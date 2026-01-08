@@ -1,0 +1,64 @@
+{
+  "info" : {
+    "arguments" : [
+      "devicectl",
+      "device",
+      "process",
+      "launch",
+      "--console",
+      "--terminate-existing",
+      "--device",
+      "00008150-001468442EE2401C",
+      "-l",
+      ".logs/devicectl_console.log",
+      "-j",
+      ".logs/devicectl_launch.json",
+      "flutterai"
+    ],
+    "commandType" : "devicectl.device.process.launch",
+    "environment" : {
+      "TERM" : "xterm-256color"
+    },
+    "jsonVersion" : 2,
+    "outcome" : "success",
+    "version" : "477.39"
+  },
+  "result" : {
+    "deviceIdentifier" : "75693C79-6ED7-50D8-8B64-8875A54B3268",
+    "launchOptions" : {
+      "activatedWhenStarted" : true,
+      "arguments" : [
+
+      ],
+      "environmentVariables" : {
+        "TERM" : "xterm-256color"
+      },
+      "platformSpecificOptions" : {
+
+      },
+      "startStopped" : false,
+      "terminateExistingInstances" : true,
+      "user" : {
+        "active" : true
+      }
+    },
+    "process" : {
+      "auditToken" : [
+        4294967295,
+        501,
+        501,
+        501,
+        501,
+        1626,
+        0,
+        4502
+      ],
+      "executable" : "file:///private/var/containers/Bundle/Application/FDFB7F59-2CC9-420D-BDCC-E2D1FC6E3AAF/Runner.app/Runner",
+      "processIdentifier" : 1626
+    },
+    "terminationResult" : {
+      "terminatingSignal" : 2,
+      "wasCoreDumpCreated" : false
+    }
+  }
+}
