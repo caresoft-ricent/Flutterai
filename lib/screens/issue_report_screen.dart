@@ -12,10 +12,16 @@ import '../services/last_inspection_location_service.dart';
 import '../services/network_service.dart';
 import '../services/speech_service.dart';
 import '../services/tts_service.dart';
+import '../services/gemma_service.dart';
+import '../services/database_service.dart';
+import '../services/procedure_acceptance_library_service.dart';
 import '../services/use_gemma_multimodal_service.dart';
 import '../services/use_offline_speech_service.dart';
+import '../models/library.dart';
+import '../models/region.dart';
 import '../widgets/photo_preview.dart';
 import 'camera_capture_screen.dart';
+import 'acceptance_guide_screen.dart';
 import 'home_screen.dart';
 
 class IssueReportScreen extends ConsumerStatefulWidget {
@@ -50,6 +56,12 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
 
   String _spokenIssueText = '';
 
+  // Voice session state (for "未选择分部分项" on this page)
+  bool _sessionProcessing = false;
+  String _sessionPartial = '';
+  String _sessionLast = '';
+  String _sessionPendingFinalText = '';
+
   String _location = '2# / 3层 / 304';
   final List<String> _locationOptions = [
     '2# / 3层 / 304',
@@ -78,6 +90,186 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
 
   void _onLocationChangedByUser(String v) {
     _applyLocation(v, updateMemory: true);
+  }
+
+  String? _extractIssuePhrase(String raw) {
+    var s = raw.trim();
+    if (s.isEmpty) return null;
+    // Remove location prefix like "3栋4层" (with optional spaces).
+    s = s.replaceAll(
+      RegExp(
+        r'^[\s\S]*?([\d一二三四五六七八九十两]+\s*(?:栋|动|楼))\s*([\d一二三四五六七八九十两]+\s*(?:层|成|城|曾|楼))',
+      ),
+      '',
+    );
+    s = s.trim();
+    // Prefer text after "发现" / "存在" if present.
+    final m = RegExp(r'(发现|存在|出现|有)(.+)$').firstMatch(s);
+    if (m != null) {
+      final t = (m.group(2) ?? '').trim();
+      return t.isEmpty ? null : t;
+    }
+    if (RegExp(
+      r'(不足|过大|过小|破损|开裂|渗漏|缺失|松动|锈蚀|蜂窝|麻面|空鼓|露筋|不合格|'
+      r'安全帽|安全带|未佩戴|未戴安全帽|未带安全帽|不戴安全帽|未系安全带|违章|违规|隐患|临边|防护)',
+    ).hasMatch(s)) {
+      return s;
+    }
+    return null;
+  }
+
+  Future<void> _startSessionListening() async {
+    if (_sessionProcessing) return;
+    final speech = ref.read(speechServiceProvider);
+    final useOfflineSpeech = ref.read(useOfflineSpeechProvider);
+
+    setState(() {
+      _sessionPartial = '';
+      _sessionLast = '';
+      _sessionPendingFinalText = '';
+    });
+
+    final ok = await speech.startListening(
+      preferOnline: !useOfflineSpeech,
+      onDownloadProgress: (_) {},
+      onPartialResult: (partial) {
+        final p = partial.trim();
+        if (p.isEmpty) return;
+        if (!mounted) return;
+        setState(() {
+          _sessionPartial = p;
+          _sessionPendingFinalText = p;
+        });
+      },
+      onFinalResult: (text) {
+        final t = text.trim();
+        if (t.isEmpty) return;
+        if (!mounted) return;
+        setState(() {
+          _sessionLast = t;
+          _sessionPendingFinalText = t;
+        });
+      },
+    );
+
+    if (!mounted) return;
+    if (!ok) {
+      final msg = speech.lastInitError ?? '语音识别启动失败';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    }
+  }
+
+  Future<void> _stopSessionListening() async {
+    final speech = ref.read(speechServiceProvider);
+    if (_sessionProcessing && !speech.isListening) return;
+
+    String finalText = '';
+    await speech.stopListening(
+      onFinalResult: (t) {
+        finalText = t;
+      },
+    );
+
+    if (!mounted) return;
+    finalText = finalText.trim().isEmpty
+        ? _sessionPendingFinalText.trim()
+        : finalText.trim();
+
+    setState(() {
+      _sessionPendingFinalText = '';
+      _sessionPartial = '';
+      _sessionLast = finalText;
+      _sessionProcessing = finalText.isNotEmpty;
+    });
+
+    if (finalText.isEmpty) {
+      if (mounted) {
+        setState(() {
+          _sessionProcessing = false;
+        });
+      }
+      return;
+    }
+
+    try {
+      await _handleRecognizedTextForSession(finalText);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _sessionProcessing = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _handleRecognizedTextForSession(String text) async {
+    final gemma = ref.read(gemmaServiceProvider);
+    final db = ref.read(databaseServiceProvider);
+    final procedureLibrary =
+        ref.read(procedureAcceptanceLibraryServiceProvider);
+    final tts = ref.read(ttsServiceProvider);
+
+    final base = await gemma.parseIntent(text);
+    final enriched = await gemma.enrichWithLocalData(base, text);
+    if (!mounted) return;
+
+    if (enriched.intent == 'procedure_acceptance') {
+      final LibraryItem? library = enriched.libraryCode != null
+          ? await procedureLibrary.getLibraryByCode(enriched.libraryCode!)
+          : await procedureLibrary
+              .findLibraryByName(enriched.libraryName ?? text);
+
+      Region? region;
+      if (enriched.regionCode != null) {
+        region = await db.getRegionByCode(enriched.regionCode!);
+      }
+      region ??= (enriched.regionText != null)
+          ? Region(
+              id: '',
+              idCode: enriched.regionCode ?? '',
+              name: enriched.regionText!,
+              parentIdCode: '',
+            )
+          : null;
+
+      if (library != null) {
+        await tts.speak(
+          '已为您匹配到${region?.name ?? enriched.regionText ?? '当前位置'} 的 ${library.name}，进入工序验收。',
+        );
+        if (!mounted) return;
+        context.goNamed(
+          AcceptanceGuideScreen.routeName,
+          extra: {
+            'region': region,
+            'library': library,
+          },
+        );
+        return;
+      }
+    }
+
+    if (enriched.intent == 'report_issue') {
+      final spoken = _extractIssuePhrase(text);
+      if (enriched.regionText != null &&
+          enriched.regionText!.trim().isNotEmpty) {
+        _applyLocation(enriched.regionText!.trim(), updateMemory: true);
+      }
+      if (spoken != null && spoken.trim().isNotEmpty) {
+        setState(() {
+          _descController.text = spoken.trim();
+          _descController.selection = TextSelection.fromPosition(
+            TextPosition(offset: _descController.text.length),
+          );
+          _spokenIssueText = spoken.trim();
+        });
+        await tts.speak('已为您填写问题描述，请继续选择分部分项或拍照。');
+      } else {
+        await tts.speak('已进入巡检，请继续描述问题或选择分部分项。');
+      }
+      return;
+    }
+
+    await tts.speak('暂时无法理解您的指令，请尝试说：1栋6层发现模板开裂。');
   }
 
   String _division = '';
@@ -182,7 +374,10 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
     //    prefer it and update memory.
     if (extra is Map && extra['regionText'] is String) {
       final raw = (extra['regionText'] as String).trim();
-      final formatted = _formatLocationFromRegionText(raw);
+      final formatted = _formatLocationFromRegionText(
+        raw,
+        existingOptions: _locationOptions,
+      );
       if (formatted != null && formatted.isNotEmpty) {
         _locationPrefilledFromExtra = true;
         _applyLocation(formatted, updateMemory: true);
@@ -198,9 +393,20 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
     }
   }
 
-  String? _formatLocationFromRegionText(String input) {
-    final s = input.replaceAll(RegExp(r'\s+'), '').trim();
+  String? _formatLocationFromRegionText(
+    String input, {
+    List<String>? existingOptions,
+  }) {
+    var s = input.replaceAll(RegExp(r'\s+'), '').trim();
     if (s.isEmpty) return null;
+
+    // Normalize common STT homophones for region units.
+    // "1动" -> "1栋", "6成/6城/6曾" -> "6层".
+    s = s.replaceAllMapped(RegExp(r'(\d+)动'), (m) => '${m.group(1)}栋');
+    s = s.replaceAllMapped(
+      RegExp(r'(\d+)(成|城|曾)'),
+      (m) => '${m.group(1)}层',
+    );
 
     // If caller already provides a dropdown-ready format, keep it.
     if (s.contains('/')) {
@@ -210,14 +416,57 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
       return parts.join(' / ');
     }
 
-    final b = RegExp(r'(\d+)(?:栋|楼)').firstMatch(s)?.group(1);
-    final f = RegExp(r'(\d+)(?:层|楼)').firstMatch(s)?.group(1);
+    final bMatch = RegExp(r'(\d+)(?:栋|楼|#)').firstMatch(s);
+    final fMatch = RegExp(r'(\d+)(?:层|楼)').firstMatch(s);
+    final b = bMatch?.group(1);
+    final f = fMatch?.group(1);
     if (b == null && f == null) return null;
 
-    final out = <String>[];
-    if (b != null) out.add('$b栋');
-    if (f != null) out.add('$f层');
-    return out.join(' / ');
+    // Optional room number: the first 2-4 digit chunk after the floor token.
+    String? room;
+    if (fMatch != null) {
+      final tail = s.substring(fMatch.end);
+      final m = RegExp(r'(\d{2,4})(?:室|房|号)?').firstMatch(tail);
+      room = m?.group(1);
+    }
+
+    final candidates = <String>[];
+    void addCandidate(String buildingSuffix) {
+      final r = room;
+      final parts = <String>[];
+      if (b != null) parts.add('$b$buildingSuffix');
+      if (f != null) parts.add('$f层');
+      if (r != null && r.isNotEmpty) parts.add(r);
+      if (parts.isNotEmpty) candidates.add(parts.join(' / '));
+
+      // Also allow without room for matching existing options.
+      if (r != null && r.isNotEmpty) {
+        final parts2 = <String>[];
+        if (b != null) parts2.add('$b$buildingSuffix');
+        if (f != null) parts2.add('$f层');
+        if (parts2.isNotEmpty) candidates.add(parts2.join(' / '));
+      }
+    }
+
+    // Prefer styles seen in the dropdown.
+    final opts = existingOptions;
+    final preferDong = opts != null && opts.any((e) => e.contains('栋'));
+    final preferHash = opts != null && opts.any((e) => e.contains('#'));
+    if (preferDong && !preferHash) {
+      addCandidate('栋');
+      addCandidate('#');
+    } else {
+      addCandidate('#');
+      addCandidate('栋');
+    }
+    if (opts != null && opts.isNotEmpty) {
+      for (final c in candidates) {
+        if (opts.contains(c)) return c;
+      }
+    }
+
+    // Fallback: keep the most informative (with room if present).
+    return candidates.isNotEmpty ? candidates.first : null;
   }
 
   @override
@@ -1056,6 +1305,54 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
           ),
         ],
       ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
+      floatingActionButton: (_item.trim().isEmpty)
+          ? GestureDetector(
+              onTap: () {
+                if (_sessionProcessing) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('请长按麦克风开始说话，松开结束')),
+                );
+              },
+              onLongPressStart: (_) async {
+                await _startSessionListening();
+              },
+              onLongPressCancel: () {
+                unawaited(_stopSessionListening());
+              },
+              onLongPressEnd: (_) {
+                unawaited(_stopSessionListening());
+              },
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  Container(
+                    width: 76,
+                    height: 76,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                    child: const Icon(
+                      Icons.mic,
+                      color: Colors.white,
+                      size: 38,
+                    ),
+                  ),
+                  if (_sessionProcessing)
+                    const Positioned.fill(
+                      child: Padding(
+                        padding: EdgeInsets.all(18),
+                        child: CircularProgressIndicator(
+                          strokeWidth: 3,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            )
+          : null,
       body: Stack(
         children: [
           SafeArea(
@@ -1288,6 +1585,31 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
               ],
             ),
           ),
+          if (_item.trim().isEmpty &&
+              (_sessionPartial.isNotEmpty || _sessionLast.isNotEmpty))
+            Positioned(
+              left: 16,
+              right: 16,
+              bottom: 110,
+              child: Card(
+                elevation: 0,
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (_sessionPartial.isNotEmpty)
+                        Text('实时识别：$_sessionPartial'),
+                      if (_sessionLast.isNotEmpty)
+                        Text(
+                          '上次识别：$_sessionLast',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
           if (_aiAnalyzing)
             const ColoredBox(
               color: Colors.black54,

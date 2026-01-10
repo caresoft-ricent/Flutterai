@@ -11,6 +11,7 @@ import '../services/gemma_service.dart';
 import '../services/speech_service.dart';
 import '../services/tts_service.dart';
 import '../services/gemma_multimodal_service.dart';
+import '../services/procedure_acceptance_library_service.dart';
 import '../services/use_gemma_multimodal_service.dart';
 import '../services/use_offline_speech_service.dart';
 import '../utils/constants.dart';
@@ -330,6 +331,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   Future<void> _handleRecognizedText(String text) async {
     final gemma = ref.read(gemmaServiceProvider);
     final db = ref.read(databaseServiceProvider);
+    final procedureLibrary =
+        ref.read(procedureAcceptanceLibraryServiceProvider);
     final tts = ref.read(ttsServiceProvider);
 
     try {
@@ -339,10 +342,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       if (!mounted) return;
 
       if (enriched.intent == 'procedure_acceptance' &&
-          enriched.libraryCode != null &&
           (enriched.regionCode != null || enriched.regionText != null)) {
-        final LibraryItem? library =
-            await db.getLibraryByCode(enriched.libraryCode!);
+        final LibraryItem? library = enriched.libraryCode != null
+            ? await procedureLibrary.getLibraryByCode(enriched.libraryCode!)
+            : await procedureLibrary
+                .findLibraryByName(enriched.libraryName ?? text);
 
         Region? region;
         if (enriched.regionCode != null) {
@@ -396,9 +400,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             final t = (m.group(2) ?? '').trim();
             return t.isEmpty ? null : t;
           }
-          // Otherwise if it contains typical issue keywords, keep as-is.
-          if (RegExp(r'(不足|过大|过小|破损|开裂|渗漏|缺失|松动|锈蚀|蜂窝|麻面|空鼓|露筋|不合格)')
-              .hasMatch(s)) {
+          // Otherwise if it contains typical issue / safety violation keywords, keep as-is.
+          if (RegExp(
+            r'(不足|过大|过小|破损|开裂|渗漏|缺失|松动|锈蚀|蜂窝|麻面|空鼓|露筋|不合格|'
+            r'安全帽|安全带|未佩戴|未戴安全帽|未带安全帽|不戴安全帽|未系安全带|违章|违规|隐患|临边|防护)',
+          ).hasMatch(s)) {
             return s;
           }
           return null;
@@ -410,9 +416,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           IssueReportScreen.routeName,
           extra: {
             'originText': text,
-            if (enriched.regionText != null &&
-                enriched.regionText!.trim().isNotEmpty)
-              'regionText': enriched.regionText!.trim(),
+            // For巡检部位，优先让问题页从原始语音句子里提取更完整的位置
+            // （例如“1栋2层201发现问题”中的 201 室），而不是仅使用
+            // enrich 后可能丢失房间号的 regionText。
+            'regionText': text,
             if (spokenIssueText != null && spokenIssueText.trim().isNotEmpty)
               'spokenIssueText': spokenIssueText.trim(),
           },
@@ -508,7 +515,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                                           .showSnackBar(
                                         SnackBar(
                                           content: Text(
-                                            'Gemma多模态启用失败：$e\n提示：该模型在 HuggingFace 为受限仓库，需要先同意许可并提供 token（dart-define:HUGGINGFACE_TOKEN）。',
+                                            'Gemma多模态启用失败：$e\n提示：该模型在 HuggingFace 为受限仓库，需要先同意许可并提供 token（--dart-define=HUGGINGFACE_TOKEN=... 或 lib/app_local_secrets.dart:kHuggingfaceToken）。',
                                           ),
                                         ),
                                       );
@@ -540,6 +547,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     onPressed: _isProcessing
                         ? null
                         : () {
+                            context.goNamed(AcceptanceGuideScreen.routeName);
+                          },
+                    icon: const Icon(Icons.checklist),
+                    label: const Text('工序验收'),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _isProcessing
+                        ? null
+                        : () {
                             context.go('/daily-inspection');
                           },
                     icon: const Icon(Icons.fact_check),
@@ -553,20 +576,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               children: [
                 Expanded(
                   child: OutlinedButton.icon(
-                    onPressed: (_isProcessing || _isDownloadingModel)
+                    onPressed: _isProcessing
                         ? null
-                        : () async {
-                            setState(() {
-                              _status = '正在检查/下载语音模型…';
-                            });
-                            final ok = await _initSpeechWithProgress();
-                            if (!mounted) return;
-                            setState(() {
-                              _status = ok ? '语音模型已就绪，可长按麦克风说话' : '模型初始化失败，请重试';
-                            });
+                        : () {
+                            context.go('/supervision-check');
                           },
-                    icon: const Icon(Icons.cloud_download),
-                    label: const Text('首次下载模型'),
+                    icon: const Icon(Icons.assignment_turned_in),
+                    label: const Text('监督检查'),
                   ),
                 ),
               ],

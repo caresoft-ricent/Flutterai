@@ -15,7 +15,7 @@ final databaseServiceProvider = Provider<DatabaseService>((ref) {
 
 class DatabaseService {
   static const _dbName = 'acceptance_demo.db';
-  static const _dbVersion = 1;
+  static const _dbVersion = 2;
 
   Database? _db;
 
@@ -35,7 +35,17 @@ class DatabaseService {
         await _createTables(db);
         await _insertMockData(db);
       },
+      onUpgrade: (db, oldVersion, newVersion) async {
+        await _upgradeDb(db, oldVersion, newVersion);
+      },
     );
+  }
+
+  Future<void> _upgradeDb(Database db, int oldVersion, int newVersion) async {
+    // v2: add template targets for A002.
+    if (oldVersion < 2) {
+      await _ensureTemplateTargets(db);
+    }
   }
 
   Future<void> _createTables(Database db) async {
@@ -150,6 +160,55 @@ class DatabaseService {
       await db.insert('rc_library_librarytarget', {
         'id_code': t['id_code'],
         'library_code': 'A001',
+        'name': t['name'],
+        'description': t['description'],
+      });
+    }
+
+    // rc_library_librarytarget for 模板工程
+    await _ensureTemplateTargets(db);
+  }
+
+  Future<void> _ensureTemplateTargets(Database db) async {
+    final rows = await db.rawQuery(
+      'SELECT COUNT(1) as c FROM rc_library_librarytarget WHERE library_code = ?',
+      ['A002'],
+    );
+    final c = (rows.isNotEmpty ? (rows.first['c'] as int?) : null) ?? 0;
+    if (c > 0) return;
+
+    final targets = [
+      {
+        'id_code': 'A002001',
+        'name': '模板及支架材料',
+        'description': '模板、支架材料规格与质量符合方案要求，无翘曲、开裂、严重锈蚀等缺陷',
+      },
+      {
+        'id_code': 'A002002',
+        'name': '模板安装尺寸与标高',
+        'description': '轴线位置、截面尺寸、标高符合设计与规范，允许偏差满足要求',
+      },
+      {
+        'id_code': 'A002003',
+        'name': '支撑体系稳定',
+        'description': '立杆间距、水平拉结、剪刀撑等满足方案，整体稳定可靠',
+      },
+      {
+        'id_code': 'A002004',
+        'name': '拼缝与加固',
+        'description': '拼缝严密不漏浆，加固牢固，螺栓/对拉螺杆设置符合要求',
+      },
+      {
+        'id_code': 'A002005',
+        'name': '预留预埋与清理',
+        'description': '预留洞口、预埋件位置正确固定牢靠；浇筑前模板内杂物清理干净并验收确认',
+      },
+    ];
+
+    for (final t in targets) {
+      await db.insert('rc_library_librarytarget', {
+        'id_code': t['id_code'],
+        'library_code': 'A002',
         'name': t['name'],
         'description': t['description'],
       });

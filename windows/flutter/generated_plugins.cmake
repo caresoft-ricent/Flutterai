@@ -6,6 +6,7 @@ list(APPEND FLUTTER_PLUGIN_LIST
   connectivity_plus
   flutter_tts
   permission_handler_windows
+  printing
   record_windows
 )
 

@@ -459,6 +459,10 @@ final stream = recognizer.createStream();
   }) async {
     if (_isListening) return true;
 
+    if (!preferOnline) {
+      _log('startListening: preferOnline=false, using offline sherpa');
+    }
+
     // Prefer Xunfei online STT when requested and credentials are present.
     // Any failure (no network / auth / ws) falls back to offline sherpa.
     if (preferOnline) {
@@ -503,6 +507,7 @@ final stream = recognizer.createStream();
 
     _isListening = true;
     _backend = _SpeechBackend.offlineSherpa;
+    _log('startListening: using offlineSherpa backend');
     _stream?.free();
     _stream = _recognizer!.createStream();
     _recognizer!.reset(_stream!);

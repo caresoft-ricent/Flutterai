@@ -5,14 +5,17 @@ import '../models/parsed_intent.dart';
 import '../models/region.dart';
 import 'database_service.dart';
 import 'gemma_multimodal_service.dart';
+import 'procedure_acceptance_library_service.dart';
 import 'use_gemma_multimodal_service.dart';
 
 final gemmaServiceProvider = Provider<GemmaService>((ref) {
   final dbService = ref.read(databaseServiceProvider);
+  final procedureLibrary = ref.read(procedureAcceptanceLibraryServiceProvider);
   final mm = ref.read(gemmaMultimodalServiceProvider);
   final useMultimodal = ref.watch(useGemmaMultimodalProvider);
   return GemmaService(
     dbService: dbService,
+    procedureLibrary: procedureLibrary,
     mm: mm,
     useMultimodal: useMultimodal,
   );
@@ -20,11 +23,13 @@ final gemmaServiceProvider = Provider<GemmaService>((ref) {
 
 class GemmaService {
   final DatabaseService dbService;
+  final ProcedureAcceptanceLibraryService procedureLibrary;
   final GemmaMultimodalService mm;
   final bool useMultimodal;
 
   GemmaService({
     required this.dbService,
+    required this.procedureLibrary,
     required this.mm,
     required this.useMultimodal,
   });
@@ -56,7 +61,24 @@ class GemmaService {
   Future<ParsedIntentResult> parseIntent(String userInput) async {
     if (useMultimodal) {
       try {
-        return await mm.parseIntent(userInput);
+        final r = await mm.parseIntent(userInput);
+
+        // If the model is uncertain, fall back to rule-based intent so common
+        // “发现…” / safety violation phrases still route correctly.
+        if (r.intent == 'unknown') {
+          final fallback = _fallbackRuleBased(userInput);
+          if (fallback.intent != 'unknown') {
+            return ParsedIntentResult(
+              intent: fallback.intent,
+              regionText: r.regionText ?? fallback.regionText,
+              regionCode: r.regionCode ?? fallback.regionCode,
+              libraryName: r.libraryName ?? fallback.libraryName,
+              libraryCode: r.libraryCode ?? fallback.libraryCode,
+            );
+          }
+        }
+
+        return r;
       } catch (_) {
         // Fall back.
       }
@@ -73,10 +95,23 @@ class GemmaService {
         normalized.contains('复检')) {
       intent = 'procedure_acceptance';
     } else if (normalized.contains('发现') ||
+        normalized.contains('存在') ||
+        normalized.contains('出现') ||
         normalized.contains('问题') ||
         normalized.contains('缺陷') ||
         normalized.contains('不合格') ||
-        normalized.contains('整改')) {
+        normalized.contains('整改') ||
+        // Safety / violation phrases (no need to say “问题”).
+        normalized.contains('未戴安全帽') ||
+        normalized.contains('未带安全帽') ||
+        normalized.contains('不戴安全帽') ||
+        normalized.contains('未佩戴') ||
+        normalized.contains('未系安全带') ||
+        normalized.contains('违章') ||
+        normalized.contains('隐患') ||
+        normalized.contains('临边') ||
+        normalized.contains('防护') ||
+        normalized.contains('坠落')) {
       intent = 'report_issue';
     }
 
@@ -113,7 +148,8 @@ class GemmaService {
     LibraryItem? library;
 
     region = await dbService.findRegionByText(base.regionText ?? userInput);
-    library = await dbService.findLibraryByName(base.libraryName ?? userInput);
+    library =
+        await procedureLibrary.findLibraryByName(base.libraryName ?? userInput);
 
     return ParsedIntentResult(
       intent: base.intent,

@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'screens/home_screen.dart';
 import 'screens/acceptance_guide_screen.dart';
 import 'screens/issue_report_screen.dart';
+import 'screens/supervision_check_screen.dart';
 import 'models/region.dart';
 import 'models/library.dart';
 
@@ -39,6 +40,11 @@ final _routerProvider = Provider<GoRouter>((ref) {
         path: '/daily-inspection',
         name: 'daily-inspection',
         builder: (context, state) => const IssueReportScreen(),
+      ),
+      GoRoute(
+        path: '/supervision-check',
+        name: SupervisionCheckScreen.routeName,
+        builder: (context, state) => const SupervisionCheckScreen(),
       ),
     ],
   );

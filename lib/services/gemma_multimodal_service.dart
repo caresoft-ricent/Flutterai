@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../app_local_secrets.dart' as local_secrets;
 import '../models/parsed_intent.dart';
 
 final gemmaMultimodalServiceProvider = Provider<GemmaMultimodalService>((ref) {
@@ -56,7 +57,9 @@ class GemmaMultimodalService {
   String? _hfTokenOrNull() {
     const token = String.fromEnvironment('HUGGINGFACE_TOKEN', defaultValue: '');
     final trimmed = token.trim();
-    return trimmed.isEmpty ? null : trimmed;
+    if (trimmed.isNotEmpty) return trimmed;
+    final local = local_secrets.kHuggingfaceToken.trim();
+    return local.isEmpty ? null : local;
   }
 
   Future<String?> _pickInstalledInferenceModelId() async {
@@ -114,7 +117,10 @@ class GemmaMultimodalService {
     // Without a token, the download will always fail with 401.
     if (token == null) {
       throw StateError(
-        '缺少 HuggingFace Token：请使用 --dart-define=HUGGINGFACE_TOKEN=... 重新运行/打包，并在 HuggingFace 模型页同意 Gemma 许可后再下载。',
+        '缺少 HuggingFace Token：该模型在 HuggingFace 为受限仓库（gated repo），需要先同意 Gemma 许可并提供 token。\n\n'
+        '配置方式：\n'
+        '1) 推荐：运行/打包命令加 --dart-define=HUGGINGFACE_TOKEN=...\n'
+        '2) （仅内测/本机）写入 lib/app_local_secrets.dart 的 kHuggingfaceToken\n',
       );
     }
 
