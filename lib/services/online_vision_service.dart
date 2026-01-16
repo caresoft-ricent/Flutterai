@@ -3,18 +3,18 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:google_generative_ai/google_generative_ai.dart';
+import 'package:image/image.dart' as img;
 
 import '../app_local_secrets.dart' as local_secrets;
 
-final geminiServiceProvider = Provider<GeminiService>((ref) {
-  return GeminiService();
+final onlineVisionServiceProvider = Provider<OnlineVisionService>((ref) {
+  return OnlineVisionService();
 });
 
 /// 极简稳版 Prompt（7 个核心字段）。
 ///
 /// 目标：最大化 JSON 完整输出概率，避免超长模板/冗余字段导致被截断。
-const String kGeminiMinimalPrompt = r'''
+const String kOnlineVisionMinimalPrompt = r'''
 你是工地巡检/验收拍照助手。根据图片判断，并只输出 1 个可严格解析的 JSON 对象。
 
 必须满足：
@@ -48,7 +48,7 @@ const String kGeminiMinimalPrompt = r'''
 }
 ''';
 
-class GeminiStructuredResult {
+class OnlineVisionStructuredResult {
   final String type;
   final String summary;
   final String defectType;
@@ -59,7 +59,7 @@ class GeminiStructuredResult {
   final Map<String, dynamic>? rawJson;
   final String rawText;
 
-  const GeminiStructuredResult({
+  const OnlineVisionStructuredResult({
     required this.type,
     required this.summary,
     required this.defectType,
@@ -74,18 +74,235 @@ class GeminiStructuredResult {
   bool get matchedHistory => matchId.trim().isNotEmpty;
 }
 
-class GeminiService {
+class OnlineVisionService {
   String? _apiKeyOrNull() {
-    const v = String.fromEnvironment('GEMINI_API_KEY', defaultValue: '');
+    const ark = String.fromEnvironment('ARK_API_KEY', defaultValue: '');
+    final arkTrim = ark.trim();
+    if (arkTrim.isNotEmpty) return arkTrim;
+
+    const doubao = String.fromEnvironment('DOUBAO_API_KEY', defaultValue: '');
+    final doubaoTrim = doubao.trim();
+    if (doubaoTrim.isNotEmpty) return doubaoTrim;
+
+    final localArk = local_secrets.kArkApiKey.trim();
+    if (localArk.isNotEmpty) return localArk;
+
+    final localDoubao = local_secrets.kDoubaoApiKey.trim();
+    if (localDoubao.isNotEmpty) return localDoubao;
+
+    return null;
+  }
+
+  String _normalizeApiKey(String raw) {
+    var s = raw.trim();
+    // Tolerate accidental copy of "Bearer xxx".
+    if (s.toLowerCase().startsWith('bearer ')) {
+      s = s.substring('bearer '.length).trim();
+    }
+    return s;
+  }
+
+  String _baseUrl() {
+    const v = String.fromEnvironment(
+      'ARK_BASE_URL',
+      defaultValue: 'https://ark.cn-beijing.volces.com/api/v3',
+    );
     final s = v.trim();
-    if (s.isNotEmpty) return s;
-    final local = local_secrets.kGeminiApiKey.trim();
-    return local.isEmpty ? null : local;
+    return s.isEmpty ? 'https://ark.cn-beijing.volces.com/api/v3' : s;
   }
 
   String _modelName() {
-    // 按需求强制为 2026 年最佳实践：gemini-2.5-flash
-    return 'gemini-2.5-flash';
+    const v = String.fromEnvironment('ARK_MODEL', defaultValue: '');
+    final s = v.trim();
+    if (s.isNotEmpty) return s;
+
+    const v2 = String.fromEnvironment('DOUBAO_MODEL', defaultValue: '');
+    final s2 = v2.trim();
+    if (s2.isNotEmpty) return s2;
+
+    final local = local_secrets.kDoubaoModel.trim();
+    if (local.isNotEmpty) return local;
+
+    // 仅兜底：建议改成你们实际开通的视觉模型或 endpoint id。
+    return 'doubao-seed-1-6-vision-250815';
+  }
+
+  int _imageMaxDim() {
+    const v = String.fromEnvironment('ARK_IMAGE_MAX_DIM', defaultValue: '');
+    final n = int.tryParse(v.trim());
+    // 默认 1280：对缺陷细节仍较友好，但显著降低像素/体积。
+    return (n == null || n < 512) ? 1280 : n;
+  }
+
+  int _imageJpegQuality() {
+    const v =
+        String.fromEnvironment('ARK_IMAGE_JPEG_QUALITY', defaultValue: '');
+    final n = int.tryParse(v.trim());
+    // 默认 80：兼顾可读性与体积。
+    return (n == null || n < 40 || n > 95) ? 80 : n;
+  }
+
+  int _imageTargetBytes() {
+    const v =
+        String.fromEnvironment('ARK_IMAGE_TARGET_BYTES', defaultValue: '');
+    final n = int.tryParse(v.trim());
+    // 默认 420KB：尽量避免超大 base64，同时保持一定细节。
+    return (n == null || n < 120 * 1024) ? 420 * 1024 : n;
+  }
+
+  Future<List<int>> _compressImageBytes(List<int> original) async {
+    img.Image? decoded;
+    try {
+      decoded = img.decodeImage(Uint8List.fromList(original));
+    } catch (_) {
+      decoded = null;
+    }
+    if (decoded == null) return original;
+
+    final target = _imageTargetBytes();
+    final maxDim = _imageMaxDim();
+    final w = decoded.width;
+    final h = decoded.height;
+    final largest = w > h ? w : h;
+
+    final needsResize = largest > maxDim;
+    final needsSmallerBytes = original.length > target;
+    if (!needsResize && !needsSmallerBytes) return original;
+
+    var processed = decoded;
+    if (largest > maxDim) {
+      final scale = maxDim / largest;
+      final newW = (w * scale).round();
+      final newH = (h * scale).round();
+      processed = img.copyResize(
+        decoded,
+        width: newW,
+        height: newH,
+        interpolation: img.Interpolation.linear,
+      );
+    }
+
+    // Encode with quality, and optionally step down if still too large.
+    var quality = _imageJpegQuality();
+    List<int> encoded = img.encodeJpg(processed, quality: quality);
+
+    // If still too large, reduce quality in a couple of steps.
+    while (encoded.length > target && quality > 55) {
+      quality = (quality - 10).clamp(55, 95);
+      encoded = img.encodeJpg(processed, quality: quality);
+      // Stop if quality clamped.
+      if (quality == 55) break;
+    }
+
+    // If compression got worse (rare), fall back to original.
+    if (encoded.length >= original.length) return original;
+    return encoded;
+  }
+
+  Future<String> _callArkResponsesOnce({
+    required String apiKey,
+    required String model,
+    required String prompt,
+    required List<int> imageBytes,
+  }) async {
+    final uri = Uri.parse('${_baseUrl()}/responses');
+
+    // Ark Responses API 支持 image_url；这里用 data URL 直接传 Base64，避免额外托管。
+    final imageDataUrl = 'data:image/jpeg;base64,${base64Encode(imageBytes)}';
+
+    final body = <String, dynamic>{
+      'model': model,
+      'input': [
+        {
+          'role': 'user',
+          'content': [
+            {
+              'type': 'input_image',
+              'image_url': imageDataUrl,
+            },
+            {
+              'type': 'input_text',
+              'text': prompt,
+            },
+          ],
+        },
+      ],
+      // 该场景不需要深度思考。
+      'thinking': {
+        'type': 'disabled',
+      },
+    };
+
+    final client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 20);
+    try {
+      final req = await client.postUrl(uri);
+      req.headers.contentType = ContentType.json;
+      req.headers.set('accept', 'application/json');
+      req.headers.set('authorization', 'Bearer $apiKey');
+      req.write(jsonEncode(body));
+
+      final resp = await req.close().timeout(const Duration(seconds: 120));
+      final respBody = await resp.transform(utf8.decoder).join();
+
+      if (resp.statusCode < 200 || resp.statusCode >= 300) {
+        final snippet =
+            respBody.length > 600 ? respBody.substring(0, 600) : respBody;
+        throw StateError('在线识别 HTTP ${resp.statusCode}: $snippet');
+      }
+
+      final decoded = jsonDecode(respBody);
+      if (decoded is! Map) {
+        throw StateError('在线识别返回格式异常（非 JSON 对象）');
+      }
+
+      // 优先读取 OpenAI Responses 风格的 `output_text`。
+      final outputText = decoded['output_text'];
+      if (outputText is String && outputText.trim().isNotEmpty) {
+        return outputText.trim();
+      }
+
+      // 兜底：遍历 output[].content[].text
+      final out = StringBuffer();
+      final output = decoded['output'];
+      if (output is List) {
+        for (final item in output) {
+          if (item is! Map) continue;
+          final content = item['content'];
+          if (content is! List) continue;
+          for (final c in content) {
+            if (c is! Map) continue;
+            final t = c['text'];
+            if (t is String && t.trim().isNotEmpty) {
+              if (out.isNotEmpty) out.writeln();
+              out.write(t.trim());
+            }
+          }
+        }
+      }
+
+      final text = out.toString().trim();
+      if (text.isNotEmpty) return text;
+
+      // 最后兜底：兼容 chat.completions 风格。
+      final choices = decoded['choices'];
+      if (choices is List && choices.isNotEmpty) {
+        final c0 = choices.first;
+        if (c0 is Map) {
+          final msg = c0['message'];
+          if (msg is Map) {
+            final content = msg['content'];
+            if (content is String && content.trim().isNotEmpty) {
+              return content.trim();
+            }
+          }
+        }
+      }
+
+      throw StateError('在线识别未返回文本结果');
+    } finally {
+      client.close(force: true);
+    }
   }
 
   String _buildPrompt({
@@ -103,21 +320,12 @@ class GeminiService {
         ? ''
         : '''\n可选问题库条目（仅在 type=defect 时可填写 match_id；若命中必须从下列选择 id）：\n${candidates.map((e) => '- $e').join('\n')}\n\n规则：\n- 若 type=defect 且明显属于上述条目：match_id 必须填入对应 id\n- 若无法确定命中：match_id 置空字符串\n''';
 
-    return '''$kGeminiMinimalPrompt
+    return '''$kOnlineVisionMinimalPrompt
 
 场景：$sceneHint
 补充要求：$hint
 $candidateSection
 ''';
-  }
-
-  GenerationConfig _generationConfig() {
-    return GenerationConfig(
-      temperature: 0.15,
-      // 给足输出上限，避免结构化 JSON 被截断。
-      maxOutputTokens: 2048,
-      responseMimeType: 'application/json',
-    );
   }
 
   String _cleanupJsonText(String input) {
@@ -151,7 +359,7 @@ $candidateSection
     return true;
   }
 
-  GeminiStructuredResult _fromJson(
+  OnlineVisionStructuredResult _fromJson(
     Map<String, dynamic> obj, {
     required String rawText,
   }) {
@@ -173,7 +381,7 @@ $candidateSection
       }
     }
 
-    return GeminiStructuredResult(
+    return OnlineVisionStructuredResult(
       type: type,
       summary: summary,
       defectType: defectType,
@@ -186,7 +394,7 @@ $candidateSection
     );
   }
 
-  GeminiStructuredResult _offlineFallback(
+  OnlineVisionStructuredResult _offlineFallback(
     String rawText, {
     List<String>? defectLibraryCandidateLines,
   }) {
@@ -215,7 +423,7 @@ $candidateSection
     final summary =
         t.isEmpty ? '识别结果解析失败，请重试。' : (t.length > 80 ? t.substring(0, 80) : t);
 
-    return GeminiStructuredResult(
+    return OnlineVisionStructuredResult(
       type: irrelevant ? 'irrelevant' : 'other',
       summary: irrelevant ? '请拍摄施工部位' : summary,
       defectType: '',
@@ -228,13 +436,13 @@ $candidateSection
     );
   }
 
-  GeminiStructuredResult _fallbackFromError(Object e) {
+  OnlineVisionStructuredResult _fallbackFromError(Object e) {
     final msg = e.toString();
     final overloaded = msg.contains('503') ||
         msg.toLowerCase().contains('overloaded') ||
         msg.toLowerCase().contains('unavailable');
 
-    return GeminiStructuredResult(
+    return OnlineVisionStructuredResult(
       type: 'other',
       summary: overloaded ? '在线模型繁忙，请稍后重试。' : '在线识别失败，请重试。',
       defectType: '',
@@ -247,41 +455,40 @@ $candidateSection
     );
   }
 
-  Future<GeminiStructuredResult> analyzeImageAutoStructured(
+  Future<OnlineVisionStructuredResult> analyzeImageAutoStructured(
     String imagePath, {
     required String sceneHint,
     required String hint,
     List<String>? defectLibraryCandidateLines,
   }) async {
-    final apiKey = _apiKeyOrNull();
-    if (apiKey == null) {
+    final rawKey = _apiKeyOrNull();
+    if (rawKey == null) {
       throw StateError(
-        '未配置 Gemini API Key（GEMINI_API_KEY 或 app_local_secrets.dart:kGeminiApiKey）',
+        '未配置在线图片识别 API Key（ARK_API_KEY/DOUBAO_API_KEY 或 app_local_secrets.dart:kArkApiKey/kDoubaoApiKey）',
       );
     }
+    final apiKey = _normalizeApiKey(rawKey);
 
-    final imageBytes = await File(imagePath).readAsBytes();
-    debugPrint('[GeminiSDK] image bytes=${imageBytes.length}');
+    final originalBytes = await File(imagePath).readAsBytes();
+    final imageBytes = await _compressImageBytes(originalBytes);
+    debugPrint(
+      '[OnlineVision] image bytes=${originalBytes.length} -> ${imageBytes.length}',
+    );
+
     final prompt = _buildPrompt(
       sceneHint: sceneHint,
       hint: hint,
       defectLibraryCandidateLines: defectLibraryCandidateLines,
     );
 
-    final model = GenerativeModel(
-      model: _modelName(),
-      apiKey: apiKey,
-      generationConfig: _generationConfig(),
-    );
-
+    final model = _modelName();
     Future<String> callOnce(String p) async {
-      final response = await model.generateContent([
-        Content.multi([
-          TextPart(p),
-          DataPart('image/jpeg', imageBytes),
-        ]),
-      ]);
-      return response.text ?? '';
+      return _callArkResponsesOnce(
+        apiKey: apiKey,
+        model: model,
+        prompt: p,
+        imageBytes: imageBytes,
+      );
     }
 
     // 第一次调用：极简 prompt。
@@ -289,7 +496,7 @@ $candidateSection
     try {
       raw = await callOnce(prompt);
     } catch (e) {
-      debugPrint('[GeminiSDK] request failed: $e');
+      debugPrint('[OnlineVision] request failed: $e');
       return _fallbackFromError(e);
     }
     var cleaned = _cleanupJsonText(raw);
@@ -306,11 +513,11 @@ $candidateSection
 
     // 若解析失败或字段不齐全：再补救重试一次（极短修复提示）。
     if (obj == null || !_looksComplete(obj)) {
-      debugPrint('[GeminiSDK] invalid/incomplete json; retry once');
+      debugPrint('[OnlineVision] invalid/incomplete json; retry once');
       final clipped =
           cleaned.length > 800 ? cleaned.substring(0, 800) : cleaned;
 
-      final repairPrompt = '''$kGeminiMinimalPrompt
+      final repairPrompt = '''$kOnlineVisionMinimalPrompt
 
 你上一轮输出无法解析或字段缺失。请仅输出 1 个完整 JSON 对象（与模板同构），不要输出任何解释文字。
 
@@ -321,7 +528,7 @@ $clipped
       try {
         raw = await callOnce(repairPrompt);
       } catch (e) {
-        debugPrint('[GeminiSDK] repair request failed: $e');
+        debugPrint('[OnlineVision] repair request failed: $e');
         return _fallbackFromError(e);
       }
       cleaned = _cleanupJsonText(raw);

@@ -7,7 +7,7 @@ import 'package:go_router/go_router.dart';
 
 import '../services/defect_library_service.dart';
 import '../services/gemma_multimodal_service.dart';
-import '../services/gemini_service.dart';
+import '../services/online_vision_service.dart';
 import '../services/last_inspection_location_service.dart';
 import '../services/network_service.dart';
 import '../services/speech_service.dart';
@@ -959,8 +959,8 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
           candidateEntries.map((e) => e.toPromptLine()).toList();
 
       if (hasNetwork && !useGemma) {
-        final gemini = ref.read(geminiServiceProvider);
-        final result = await gemini.analyzeImageAutoStructured(
+        final onlineVision = ref.read(onlineVisionServiceProvider);
+        final result = await onlineVision.analyzeImageAutoStructured(
           path,
           sceneHint: sceneHint,
           hint: hint,

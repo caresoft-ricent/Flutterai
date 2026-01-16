@@ -60,9 +60,11 @@ dependencies:
   crypto: ^3.0.3
   web_socket_channel: ^2.4.5
 
-  # Online LLM (Gemini multimodal)
-  google_generative_ai: ^0.4.7
+  # Online AI network utils
   connectivity_plus: ^6.0.3
+
+  # Image resize/compress (request-time optimization)
+  image: ^4.2.0
 
   # Permissions and camera
   permission_handler: ^11.0.0
