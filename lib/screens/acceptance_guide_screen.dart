@@ -9,7 +9,7 @@ import '../models/library.dart';
 import '../models/region.dart';
 import '../models/target.dart';
 import '../services/defect_library_service.dart';
-import '../services/gemini_service.dart';
+import '../services/online_vision_service.dart';
 import '../services/gemma_multimodal_service.dart';
 import '../services/offline_cache_service.dart';
 import '../services/database_service.dart';
@@ -88,10 +88,13 @@ class _AcceptanceGuideScreenState extends ConsumerState<AcceptanceGuideScreen> {
 
   final Map<String, AcceptanceRecord> _records = {};
   final Map<String, AcceptanceResult> _results = {};
-  final Map<String, GeminiStructuredResult> _aiResults = {};
+  final Map<String, OnlineVisionStructuredResult> _aiResults = {};
 
-  GeminiStructuredResult _withMatchId(GeminiStructuredResult r, String id) {
-    return GeminiStructuredResult(
+  OnlineVisionStructuredResult _withMatchId(
+    OnlineVisionStructuredResult r,
+    String id,
+  ) {
+    return OnlineVisionStructuredResult(
       type: r.type,
       summary: r.summary,
       defectType: r.defectType,
@@ -719,7 +722,7 @@ class _AcceptanceGuideScreenState extends ConsumerState<AcceptanceGuideScreen> {
           }
         }
 
-        // Online Gemini structured analysis (for acceptance display).
+        // Online structured analysis (for acceptance display).
         try {
           // 本地问题库候选（assets/defect_library），不涉及后端。
           final defectLibrary = ref.read(defectLibraryServiceProvider);
@@ -738,15 +741,15 @@ class _AcceptanceGuideScreenState extends ConsumerState<AcceptanceGuideScreen> {
           final candidateLines =
               candidates.map((e) => e.toPromptLine()).toList();
 
-          final gemini = ref.read(geminiServiceProvider);
-          var ai = await gemini.analyzeImageAutoStructured(
+          final onlineVision = ref.read(onlineVisionServiceProvider);
+          var ai = await onlineVision.analyzeImageAutoStructured(
             path,
             sceneHint: '工序验收拍照（可能是构件/工艺照片，也可能是铭牌/合格证）',
             hint: '如果照片不是施工部位或无法判断，请返回 type=irrelevant 并提示重拍。',
             defectLibraryCandidateLines: candidateLines,
           );
 
-          // 若 Gemini 未给出 match_id，使用本地缺陷库按 summary 等再推断一次。
+          // 若未给出 match_id，使用本地缺陷库按 summary 等再推断一次。
           if (ai.type.trim() == 'defect' && ai.matchId.trim().isEmpty) {
             final inferQuery = <String>[
               candidateQuery,
@@ -1237,7 +1240,7 @@ class _AcceptanceTargetCard extends StatelessWidget {
   final AcceptanceResult? selected;
   final bool isCurrent;
   final ValueChanged<AcceptanceResult> onSelected;
-  final GeminiStructuredResult? analysis;
+  final OnlineVisionStructuredResult? analysis;
 
   const _AcceptanceTargetCard({
     required this.target,
@@ -1335,7 +1338,7 @@ class _AcceptanceTargetCard extends StatelessWidget {
 }
 
 class _AcceptanceAiPanel extends StatelessWidget {
-  final GeminiStructuredResult result;
+  final OnlineVisionStructuredResult result;
 
   const _AcceptanceAiPanel({required this.result});
 
