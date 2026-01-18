@@ -17,6 +17,7 @@ import '../services/use_offline_speech_service.dart';
 import '../utils/constants.dart';
 import 'acceptance_guide_screen.dart';
 import 'issue_report_screen.dart';
+import 'panorama_inspection_screen.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   static const routeName = 'home';
@@ -583,6 +584,24 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                           },
                     icon: const Icon(Icons.assignment_turned_in),
                     label: const Text('监督检查'),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _isProcessing
+                        ? null
+                        : () {
+                            context.goNamed(
+                              PanoramaInspectionScreen.routeName,
+                            );
+                          },
+                    icon: const Icon(Icons.panorama_horizontal),
+                    label: const Text('全景巡检'),
                   ),
                 ),
               ],

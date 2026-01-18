@@ -32,6 +32,15 @@
 	<string>需要访问麦克风用于语音识别</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>需要保存验收照片到相册</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>需要访问相册用于选择图纸与全景照片</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>需要访问本地网络用于连接全景相机并取回照片</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>需要访问语音识别用于离线语音交互</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>

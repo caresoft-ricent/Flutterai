@@ -63,6 +63,15 @@ dependencies:
   # Online AI network utils
   connectivity_plus: ^6.0.3
 
+  # File import (floor plan / pano photo)
+  file_picker: ^8.0.7
+
+  # Pick images from gallery (floor plan / pano photo)
+  image_picker: ^1.1.2
+
+  # 360 panorama viewer
+  panorama: ^0.4.1
+
   # Image resize/compress (request-time optimization)
   image: ^4.2.0
 

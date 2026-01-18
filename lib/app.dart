@@ -6,6 +6,7 @@ import 'screens/home_screen.dart';
 import 'screens/acceptance_guide_screen.dart';
 import 'screens/issue_report_screen.dart';
 import 'screens/supervision_check_screen.dart';
+import 'screens/panorama_inspection_screen.dart';
 import 'models/region.dart';
 import 'models/library.dart';
 
@@ -45,6 +46,11 @@ final _routerProvider = Provider<GoRouter>((ref) {
         path: '/supervision-check',
         name: SupervisionCheckScreen.routeName,
         builder: (context, state) => const SupervisionCheckScreen(),
+      ),
+      GoRoute(
+        path: '/panorama-inspection',
+        name: PanoramaInspectionScreen.routeName,
+        builder: (context, state) => const PanoramaInspectionScreen(),
       ),
     ],
   );
