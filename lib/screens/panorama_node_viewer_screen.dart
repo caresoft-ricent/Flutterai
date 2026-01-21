@@ -1,8 +1,8 @@
 import 'dart:io';
-import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:panorama/panorama.dart';
 
 import '../models/panorama_session.dart';
 import '../services/panorama_recognition_service.dart';
@@ -40,8 +40,24 @@ class _PanoramaNodeViewerScreenState
     _load();
   }
 
+  void _evictPanoImageFromCache() {
+    final path = _node?.panoImagePath;
+    if (path == null || path.trim().isEmpty) return;
+    final file = File(path);
+    final provider = FileImage(file);
+    try {
+      PaintingBinding.instance.imageCache.evict(provider);
+      PaintingBinding.instance.imageCache.clearLiveImages();
+    } catch (_) {
+      // ignore
+    }
+  }
+
   void _forcePanoRebuild({required bool evictImage}) {
     if (!mounted) return;
+    if (evictImage) {
+      _evictPanoImageFromCache();
+    }
     setState(() {
       _panoReloadToken = DateTime.now().microsecondsSinceEpoch;
     });
@@ -172,7 +188,7 @@ class _PanoramaNodeViewerScreenState
           TextButton(
             onPressed: () {
               Navigator.of(ctx).pop();
-              _forcePanoRebuild(evictImage: false);
+              _forcePanoRebuild(evictImage: true);
             },
             child: const Text('强制刷新'),
           ),
@@ -273,6 +289,7 @@ class _PanoramaNodeViewerScreenState
                                       '${n.panoImagePath}|$_panoReloadToken',
                                     ),
                                     path: n.panoImagePath!,
+                                    reloadToken: _panoReloadToken,
                                   )
                                 : const Center(
                                     child: Text('全景照片文件不存在，请重新采集'),
@@ -294,7 +311,7 @@ class _PanoramaNodeViewerScreenState
                                       ),
                                     );
                                     if (!mounted) return;
-                                    _forcePanoRebuild(evictImage: false);
+                                    _forcePanoRebuild(evictImage: true);
                                   },
                                   child: Text('已识别问题（${n.findings.length}个）'),
                                 )
@@ -313,241 +330,101 @@ class _PanoramaNodeViewerScreenState
 
 class _PanoramaImageView extends StatelessWidget {
   final String path;
+  final int reloadToken;
 
-  const _PanoramaImageView({super.key, required this.path});
+  const _PanoramaImageView({
+    super.key,
+    required this.path,
+    required this.reloadToken,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return _StableEquirectPanoramaViewer(path: path);
+    return _PanoramaImageViewInternal(
+      key: ValueKey('pano_view|$path|$reloadToken'),
+      path: path,
+      reloadToken: reloadToken,
+    );
   }
 }
 
-class _StableEquirectPanoramaViewer extends StatefulWidget {
+class _PanoramaImageViewInternal extends StatefulWidget {
   final String path;
+  final int reloadToken;
 
-  const _StableEquirectPanoramaViewer({required this.path});
+  const _PanoramaImageViewInternal({
+    super.key,
+    required this.path,
+    required this.reloadToken,
+  });
 
   @override
-  State<_StableEquirectPanoramaViewer> createState() =>
-      _StableEquirectPanoramaViewerState();
+  State<_PanoramaImageViewInternal> createState() =>
+      _PanoramaImageViewInternalState();
 }
 
-class _StableEquirectPanoramaViewerState
-    extends State<_StableEquirectPanoramaViewer> {
-  ui.Image? _image;
-  Object? _error;
-  bool _loading = true;
-
-  // 0..1 wraps horizontally; pitch in [-0.5, 0.5] (clamped).
-  double _yaw = 0.5;
-  double _pitch = 0.0;
-  double _zoom = 1.0;
+class _PanoramaImageViewInternalState
+    extends State<_PanoramaImageViewInternal> {
+  void _evict() {
+    final file = File(widget.path);
+    final provider = FileImage(file);
+    try {
+      PaintingBinding.instance.imageCache.evict(provider);
+      PaintingBinding.instance.imageCache.clearLiveImages();
+    } catch (_) {
+      // ignore
+    }
+  }
 
   @override
   void initState() {
     super.initState();
-    _loadImage();
+    // Critical: avoid ImageCache hit causing Panorama to bind a stale texture.
+    _evict();
   }
 
   @override
-  void didUpdateWidget(covariant _StableEquirectPanoramaViewer oldWidget) {
+  void didUpdateWidget(covariant _PanoramaImageViewInternal oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.path != widget.path) {
-      _disposeImage();
-      _yaw = 0.5;
-      _pitch = 0.0;
-      _zoom = 1.0;
-      _loadImage();
-    }
-  }
-
-  void _disposeImage() {
-    try {
-      _image?.dispose();
-    } catch (_) {}
-    _image = null;
-  }
-
-  Future<void> _loadImage() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
-
-    try {
-      final file = File(widget.path);
-      if (!await file.exists()) {
-        throw Exception('file_not_found');
-      }
-
-      final bytes = await file.readAsBytes();
-      // Decode via codec for deterministic behavior on iOS release.
-      final codec = await ui.instantiateImageCodec(
-        bytes,
-        targetWidth: 4096,
-      );
-      final frame = await codec.getNextFrame();
-      if (!mounted) {
-        frame.image.dispose();
-        return;
-      }
-      setState(() {
-        _image = frame.image;
-        _loading = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _error = e;
-        _loading = false;
-      });
+    if (oldWidget.path != widget.path ||
+        oldWidget.reloadToken != widget.reloadToken) {
+      _evict();
     }
   }
 
   @override
   void dispose() {
-    _disposeImage();
+    // Best-effort cleanup.
+    _evict();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_loading) {
-      return const Center(child: CircularProgressIndicator());
-    }
-    if (_error != null || _image == null) {
-      return const Center(child: Text('图片加载失败'));
+    final file = File(widget.path);
+    if (!file.existsSync()) {
+      return const Center(child: Text('全景照片文件不存在，请重新采集'));
     }
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final size = Size(constraints.maxWidth, constraints.maxHeight);
-        if (size.width <= 0 || size.height <= 0) {
-          return const SizedBox.shrink();
-        }
+    final panoKey = ValueKey('panorama|${widget.path}|${widget.reloadToken}');
+    final imgKey = ValueKey('image|${widget.path}|${widget.reloadToken}');
 
-        double startYaw = _yaw;
-        double startPitch = _pitch;
-        double startZoom = _zoom;
-
-        return GestureDetector(
-          onDoubleTap: () {
-            setState(() {
-              _yaw = 0.5;
-              _pitch = 0.0;
-              _zoom = 1.0;
-            });
-          },
-          onScaleStart: (_) {
-            startYaw = _yaw;
-            startPitch = _pitch;
-            startZoom = _zoom;
-          },
-          onScaleUpdate: (details) {
-            final dx = details.focalPointDelta.dx;
-            final dy = details.focalPointDelta.dy;
-
-            var nextZoom = (startZoom * details.scale).clamp(1.0, 4.0);
-            // Drag sensitivity: higher zoom => smaller movement.
-            final dragFactor = 1.0 / nextZoom;
-            var nextYaw = startYaw - (dx / size.width) * dragFactor;
-            nextYaw = nextYaw - nextYaw.floorToDouble(); // wrap to [0,1)
-
-            var nextPitch = startPitch + (dy / size.height) * dragFactor;
-            nextPitch = nextPitch.clamp(-0.5, 0.5);
-
-            setState(() {
-              _zoom = nextZoom;
-              _yaw = nextYaw;
-              _pitch = nextPitch;
-            });
-          },
-          child: CustomPaint(
-            painter: _EquirectPainter(
-              image: _image!,
-              yaw: _yaw,
-              pitch: _pitch,
-              zoom: _zoom,
-            ),
-            size: Size.infinite,
-          ),
-        );
-      },
+    return ClipRect(
+      child: Panorama(
+        key: panoKey,
+        sensorControl: SensorControl.None,
+        minZoom: 0.8,
+        maxZoom: 3.6,
+        child: Image(
+          key: imgKey,
+          image: FileImage(file),
+          fit: BoxFit.cover,
+          gaplessPlayback: true,
+          filterQuality: FilterQuality.low,
+          errorBuilder: (c, e, s) => const Center(child: Text('图片加载失败')),
+        ),
+      ),
     );
-  }
-}
-
-class _EquirectPainter extends CustomPainter {
-  final ui.Image image;
-  final double yaw;
-  final double pitch;
-  final double zoom;
-
-  const _EquirectPainter({
-    required this.image,
-    required this.yaw,
-    required this.pitch,
-    required this.zoom,
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final imgW = image.width.toDouble();
-    final imgH = image.height.toDouble();
-    if (imgW <= 1 || imgH <= 1 || size.width <= 1 || size.height <= 1) {
-      return;
-    }
-
-    final viewAspect = size.width / size.height;
-
-    // Determine the source rect size to fill the viewport.
-    var srcH = (imgH / zoom).clamp(1.0, imgH);
-    var srcW = srcH * viewAspect;
-    if (srcW > imgW) {
-      srcW = imgW;
-      srcH = (srcW / viewAspect).clamp(1.0, imgH);
-    }
-
-    // Vertical (pitch) clamp.
-    final yCenter = (imgH / 2) + pitch * (imgH - srcH);
-    final y0 = (yCenter - srcH / 2).clamp(0.0, imgH - srcH);
-
-    // Horizontal wrap.
-    var x0 = yaw * imgW - srcW / 2;
-    while (x0 < 0) {
-      x0 += imgW;
-    }
-    while (x0 >= imgW) {
-      x0 -= imgW;
-    }
-
-    final dst = Rect.fromLTWH(0, 0, size.width, size.height);
-    if (x0 + srcW <= imgW) {
-      final src = Rect.fromLTWH(x0, y0, srcW, srcH);
-      canvas.drawImageRect(image, src, dst, Paint());
-      return;
-    }
-
-    // Wrap-around split into two draws.
-    final w1 = imgW - x0;
-    final w2 = srcW - w1;
-    final dstW1 = size.width * (w1 / srcW);
-
-    final src1 = Rect.fromLTWH(x0, y0, w1, srcH);
-    final dst1 = Rect.fromLTWH(0, 0, dstW1, size.height);
-    canvas.drawImageRect(image, src1, dst1, Paint());
-
-    final src2 = Rect.fromLTWH(0, y0, w2, srcH);
-    final dst2 = Rect.fromLTWH(dstW1, 0, size.width - dstW1, size.height);
-    canvas.drawImageRect(image, src2, dst2, Paint());
-  }
-
-  @override
-  bool shouldRepaint(covariant _EquirectPainter oldDelegate) {
-    return oldDelegate.image != image ||
-        oldDelegate.yaw != yaw ||
-        oldDelegate.pitch != pitch ||
-        oldDelegate.zoom != zoom;
   }
 }
 
