@@ -66,7 +66,69 @@ class PanoramaStorageService {
     final text = await f.readAsString();
     final decoded = jsonDecode(text);
     if (decoded is! Map) return null;
-    return PanoramaSession.fromJson(decoded.cast<String, dynamic>());
+    final s = PanoramaSession.fromJson(decoded.cast<String, dynamic>());
+    final repaired = await _repairSessionPaths(s);
+    if (repaired != s) {
+      // Best-effort persist repaired paths so next load is clean.
+      await saveSession(repaired);
+    }
+    return repaired;
+  }
+
+  Future<PanoramaSession> _repairSessionPaths(PanoramaSession s) async {
+    final dir = await sessionDir(s.id);
+    final base = dir.path;
+
+    String? repairPath(String? path) {
+      final p0 = path?.trim();
+      if (p0 == null || p0.isEmpty) return path;
+      final f0 = File(p0);
+      if (f0.existsSync()) return p0;
+
+      final normalized = p0.replaceAll('\\', '/');
+      final marker = '/panorama_sessions/${s.id}/';
+      final idx = normalized.indexOf(marker);
+      if (idx >= 0) {
+        final suffix = normalized.substring(idx + marker.length);
+        final candidate = p.join(base, suffix);
+        if (File(candidate).existsSync()) return candidate;
+      }
+
+      // If it's already a relative path, try resolve against session dir.
+      if (!p.isAbsolute(p0)) {
+        final candidate = p.join(base, p0);
+        if (File(candidate).existsSync()) return candidate;
+      }
+
+      return p0;
+    }
+
+    var changed = false;
+
+    final fp = s.floorPlan;
+    PanoramaFloorPlan? fp2 = fp;
+    if (fp != null) {
+      final rp = repairPath(fp.localPath);
+      if (rp != fp.localPath) {
+        fp2 = PanoramaFloorPlan(localPath: rp ?? fp.localPath, type: fp.type);
+        changed = true;
+      }
+    }
+
+    final nodes = <PanoramaNode>[];
+    for (final n in s.nodes) {
+      final pano2 = repairPath(n.panoImagePath);
+      final thumb2 = repairPath(n.thumbnailPath);
+      if (pano2 != n.panoImagePath || thumb2 != n.thumbnailPath) {
+        nodes.add(n.copyWith(panoImagePath: pano2, thumbnailPath: thumb2));
+        changed = true;
+      } else {
+        nodes.add(n);
+      }
+    }
+
+    if (!changed) return s;
+    return s.copyWith(floorPlan: fp2, nodes: nodes);
   }
 
   Future<List<PanoramaSession>> listSessions() async {
