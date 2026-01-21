@@ -618,10 +618,22 @@ class _PanoramaInspectionScreenState
             }
           },
         ),
-        title: GestureDetector(
-          onLongPress: _clearLocalData,
-          child: const Text('全景巡检'),
-        ),
+        title: const Text('全景巡检'),
+        actions: [
+          PopupMenuButton<String>(
+            onSelected: (v) {
+              if (v == 'clear') {
+                _clearLocalData();
+              }
+            },
+            itemBuilder: (ctx) => [
+              const PopupMenuItem<String>(
+                value: 'clear',
+                child: Text('清空本地数据'),
+              ),
+            ],
+          ),
+        ],
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())

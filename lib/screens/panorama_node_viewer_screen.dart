@@ -31,11 +31,36 @@ class _PanoramaNodeViewerScreenState
   bool _loading = true;
   bool _recognizing = false;
   bool _changed = false;
+  int _panoReloadToken = 0;
 
   @override
   void initState() {
     super.initState();
+    _panoReloadToken = DateTime.now().microsecondsSinceEpoch;
     _load();
+  }
+
+  void _evictPanoImageFromCache() {
+    final path = _node?.panoImagePath;
+    if (path == null || path.trim().isEmpty) return;
+    final file = File(path);
+    final provider = FileImage(file);
+    try {
+      PaintingBinding.instance.imageCache.evict(provider);
+      PaintingBinding.instance.imageCache.clearLiveImages();
+    } catch (_) {
+      // ignore
+    }
+  }
+
+  void _forcePanoRebuild({required bool evictImage}) {
+    if (!mounted) return;
+    if (evictImage) {
+      _evictPanoImageFromCache();
+    }
+    setState(() {
+      _panoReloadToken = DateTime.now().microsecondsSinceEpoch;
+    });
   }
 
   Future<void> _load() async {
@@ -47,6 +72,7 @@ class _PanoramaNodeViewerScreenState
       _session = s;
       _node = node;
       _loading = false;
+      _panoReloadToken = DateTime.now().microsecondsSinceEpoch;
     });
   }
 
@@ -113,7 +139,7 @@ class _PanoramaNodeViewerScreenState
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('识别完成：${findings.length} 条结果')),
+        SnackBar(content: Text('识别完成：${findings.length} 条结果，可点击下方查看')),
       );
     } catch (e) {
       if (!mounted) return;
@@ -126,10 +152,64 @@ class _PanoramaNodeViewerScreenState
     }
   }
 
+  Future<void> _showDiagnostics() async {
+    final n = _node;
+    final path = n?.panoImagePath;
+    String exists = 'N/A';
+    String size = 'N/A';
+    String mtime = 'N/A';
+    if (path != null && path.trim().isNotEmpty) {
+      final f = File(path);
+      exists = f.existsSync() ? 'YES' : 'NO';
+      if (f.existsSync()) {
+        try {
+          final st = f.statSync();
+          size = '${st.size} bytes';
+          mtime = st.modified.toIso8601String();
+        } catch (_) {}
+      }
+    }
+
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('全景诊断信息'),
+        content: SingleChildScrollView(
+          child: Text(
+            'panoImagePath:\n${path ?? '(null)'}\n\n'
+            'exists: $exists\n'
+            'size: $size\n'
+            'modified: $mtime\n\n'
+            '提示：如果 exists=NO，说明本机文件已不存在（可能被清空本地数据/采集未成功/系统清理），需要重新采集。',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              _forcePanoRebuild(evictImage: true);
+            },
+            child: const Text('强制刷新'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('知道了'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final n = _node;
-    final recognized = (n?.status == 'done') || _changed;
+    final recognized = ((n?.status == 'done') || _changed) &&
+        (n?.findings.isNotEmpty ?? false);
+    final panoPath = n?.panoImagePath;
+    final panoExists = panoPath != null && panoPath.trim().isNotEmpty
+        ? File(panoPath).existsSync()
+        : false;
 
     return PopScope(
       canPop: false,
@@ -140,6 +220,13 @@ class _PanoramaNodeViewerScreenState
       child: Scaffold(
         appBar: AppBar(
           title: const Text('查看全景图'),
+          actions: [
+            IconButton(
+              tooltip: '诊断',
+              onPressed: _showDiagnostics,
+              icon: const Icon(Icons.info_outline),
+            ),
+          ],
         ),
         body: _loading
             ? const Center(child: CircularProgressIndicator())
@@ -153,7 +240,9 @@ class _PanoramaNodeViewerScreenState
                           width: double.infinity,
                           height: 44,
                           child: FilledButton(
-                            onPressed: _recognizing ? null : _startRecognize,
+                            onPressed: (_recognizing || (n.status == 'done'))
+                                ? null
+                                : _startRecognize,
                             child: _recognizing
                                 ? const Row(
                                     mainAxisAlignment: MainAxisAlignment.center,
@@ -169,34 +258,67 @@ class _PanoramaNodeViewerScreenState
                                       Text('识别中…'),
                                     ],
                                   )
-                                : const Text('开始识别'),
+                                : Text(
+                                    (n.status == 'done') ? '已识别' : '开始识别',
+                                  ),
                           ),
                         ),
                       ),
+                      if (recognized)
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(12, 2, 12, 8),
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              '识别完成，可点击下方查看问题清单',
+                              style: TextStyle(
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSurfaceVariant,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
+                        ),
                       Expanded(
                         child: n.panoImagePath == null
                             ? const Center(child: Text('暂无全景照片'))
-                            : _PanoramaImageView(path: n.panoImagePath!),
+                            : (panoExists
+                                ? _PanoramaImageView(
+                                    key: ValueKey(
+                                      '${n.panoImagePath}|$_panoReloadToken',
+                                    ),
+                                    path: n.panoImagePath!,
+                                    reloadToken: _panoReloadToken,
+                                  )
+                                : const Center(
+                                    child: Text('全景照片文件不存在，请重新采集'),
+                                  )),
                       ),
                       Padding(
                         padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
                         child: SizedBox(
                           width: double.infinity,
                           height: 44,
-                          child: FilledButton.tonal(
-                            onPressed: !recognized
-                                ? null
-                                : () {
-                                    Navigator.of(context).push(
+                          child: recognized
+                              ? FilledButton(
+                                  onPressed: () async {
+                                    await Navigator.of(context).push(
                                       MaterialPageRoute(
                                         builder: (_) => PanoramaFindingsScreen(
                                           findings: n.findings,
                                         ),
                                       ),
                                     );
+                                    if (!mounted) return;
+                                    _forcePanoRebuild(evictImage: true);
                                   },
-                            child: Text('已识别问题（${n.findings.length}个）'),
-                          ),
+                                  child: Text('已识别问题（${n.findings.length}个）'),
+                                )
+                              : FilledButton.tonal(
+                                  onPressed: null,
+                                  child: Text('已识别问题（${n.findings.length}个）'),
+                                ),
                         ),
                       ),
                     ],
@@ -208,19 +330,97 @@ class _PanoramaNodeViewerScreenState
 
 class _PanoramaImageView extends StatelessWidget {
   final String path;
+  final int reloadToken;
 
-  const _PanoramaImageView({required this.path});
+  const _PanoramaImageView({
+    super.key,
+    required this.path,
+    required this.reloadToken,
+  });
 
   @override
   Widget build(BuildContext context) {
+    return _PanoramaImageViewInternal(
+      key: ValueKey('pano_view|$path|$reloadToken'),
+      path: path,
+      reloadToken: reloadToken,
+    );
+  }
+}
+
+class _PanoramaImageViewInternal extends StatefulWidget {
+  final String path;
+  final int reloadToken;
+
+  const _PanoramaImageViewInternal({
+    super.key,
+    required this.path,
+    required this.reloadToken,
+  });
+
+  @override
+  State<_PanoramaImageViewInternal> createState() =>
+      _PanoramaImageViewInternalState();
+}
+
+class _PanoramaImageViewInternalState
+    extends State<_PanoramaImageViewInternal> {
+  void _evict() {
+    final file = File(widget.path);
+    final provider = FileImage(file);
+    try {
+      PaintingBinding.instance.imageCache.evict(provider);
+      PaintingBinding.instance.imageCache.clearLiveImages();
+    } catch (_) {
+      // ignore
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    // Critical: avoid ImageCache hit causing Panorama to bind a stale texture.
+    _evict();
+  }
+
+  @override
+  void didUpdateWidget(covariant _PanoramaImageViewInternal oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.path != widget.path ||
+        oldWidget.reloadToken != widget.reloadToken) {
+      _evict();
+    }
+  }
+
+  @override
+  void dispose() {
+    // Best-effort cleanup.
+    _evict();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final file = File(widget.path);
+    if (!file.existsSync()) {
+      return const Center(child: Text('全景照片文件不存在，请重新采集'));
+    }
+
+    final panoKey = ValueKey('panorama|${widget.path}|${widget.reloadToken}');
+    final imgKey = ValueKey('image|${widget.path}|${widget.reloadToken}');
+
     return ClipRect(
       child: Panorama(
+        key: panoKey,
         sensorControl: SensorControl.None,
         minZoom: 0.8,
         maxZoom: 3.6,
-        child: Image.file(
-          File(path),
+        child: Image(
+          key: imgKey,
+          image: FileImage(file),
           fit: BoxFit.cover,
+          gaplessPlayback: true,
+          filterQuality: FilterQuality.low,
           errorBuilder: (c, e, s) => const Center(child: Text('图片加载失败')),
         ),
       ),
