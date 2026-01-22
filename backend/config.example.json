@@ -1,0 +1,7 @@
+{
+  "doubao": {
+    "api_key": "填你的 API Key",
+    "model": "填你的 Endpoint/Model ID（例如 ep-xxxx）",
+    "base_url": "https://ark.cn-beijing.volces.com/api/v3"
+  }
+}

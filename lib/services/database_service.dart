@@ -15,7 +15,7 @@ final databaseServiceProvider = Provider<DatabaseService>((ref) {
 
 class DatabaseService {
   static const _dbName = 'acceptance_demo.db';
-  static const _dbVersion = 2;
+  static const _dbVersion = 3;
 
   Database? _db;
 
@@ -46,6 +46,49 @@ class DatabaseService {
     if (oldVersion < 2) {
       await _ensureTemplateTargets(db);
     }
+
+    // v3: fix legacy acceptance location texts.
+    if (oldVersion < 3) {
+      await _fixAcceptanceRegionTextsV3(db);
+    }
+  }
+
+  Future<void> _fixAcceptanceRegionTextsV3(Database db) async {
+    // Normalize a few legacy/demo values so backend can parse building+floor.
+    // Requested mapping:
+    // - "测试项目 / 1期 / 1栋" -> "1栋10层"
+    // - "6层" -> "1栋6层"
+    // - "1栋" -> "1栋8层"
+
+    Future<void> updateExact(String oldText, String newText) async {
+      final newVirtualCode = 'virtual:$newText';
+      await db.rawUpdate(
+        'UPDATE acceptance_record '
+        'SET region_text = ?, '
+        'region_code = CASE WHEN region_code LIKE ? THEN ? ELSE region_code END '
+        'WHERE region_text = ?',
+        [newText, 'virtual:%', newVirtualCode, oldText],
+      );
+    }
+
+    // 1) Full path variants (with/without spaces around '/').
+    const oldPaths = [
+      '测试项目 / 1期 / 1栋',
+      '测试项目/1期/1栋',
+      '测试项目 / 1期/1栋',
+      '测试项目/1期 / 1栋',
+    ];
+    for (final old in oldPaths) {
+      await updateExact(old, '1栋10层');
+    }
+
+    // 2) Floor-only legacy.
+    await updateExact('6层', '1栋6层');
+    await updateExact('6 层', '1栋6层');
+
+    // 3) Building-only legacy.
+    await updateExact('1栋', '1栋8层');
+    await updateExact('1 栋', '1栋8层');
   }
 
   Future<void> _createTables(Database db) async {
@@ -306,7 +349,8 @@ class DatabaseService {
   Future<Region?> findRegionByText(String text) async {
     final db = await database;
     // 简化：尝试按名称模糊匹配，例如“1栋6层”包含“1栋”和“6层”
-    String? foundCode;
+    String? foundBuildingCode;
+    String? foundFloorCode;
 
     final normalized = _normalizeText(text);
 
@@ -340,7 +384,7 @@ class DatabaseService {
         limit: 1,
       );
       if (rows.isNotEmpty) {
-        foundCode = rows.first['id_code'] as String;
+        foundBuildingCode = rows.first['id_code'] as String;
       }
     }
 
@@ -352,17 +396,24 @@ class DatabaseService {
         limit: 1,
       );
       if (rows.isNotEmpty) {
-        foundCode = rows.first['id_code'] as String;
+        foundFloorCode = rows.first['id_code'] as String;
       }
     }
 
-    if (foundCode == null) {
+    // Key fix: if user mentioned a floor but local DB doesn't have that floor,
+    // do NOT degrade to just the building; return a virtual region including floor.
+    if (floorName != null && foundFloorCode == null) {
+      return virtualRegion();
+    }
+
+    final chosen = foundFloorCode ?? foundBuildingCode;
+    if (chosen == null) {
       if (buildingName != null || floorName != null) {
         return virtualRegion();
       }
       return null;
     }
-    return getRegionByCode(foundCode);
+    return getRegionByCode(chosen);
   }
 
   Future<LibraryItem?> getLibraryByCode(String code) async {

@@ -16,8 +16,12 @@ import '../services/use_gemma_multimodal_service.dart';
 import '../services/use_offline_speech_service.dart';
 import '../utils/constants.dart';
 import 'acceptance_guide_screen.dart';
+import 'backend_settings_screen.dart';
 import 'issue_report_screen.dart';
 import 'panorama_inspection_screen.dart';
+import 'ai_chat_screen.dart';
+import 'records_screen.dart';
+import 'project_dashboard_screen.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   static const routeName = 'home';
@@ -451,6 +455,66 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('河狸云AI - Demo'),
+        actions: [
+          IconButton(
+            onPressed: () {
+              context.pushNamed(RecordsScreen.routeName);
+            },
+            icon: const Icon(Icons.table_rows),
+            tooltip: '记录表',
+          ),
+          IconButton(
+            onPressed: () {
+              context.pushNamed(BackendSettingsScreen.routeName);
+            },
+            icon: const Icon(Icons.settings),
+            tooltip: '后端设置',
+          ),
+        ],
+      ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
+      floatingActionButton: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: SizedBox(
+          width: MediaQuery.sizeOf(context).width,
+          height: 64,
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Align(
+                alignment: Alignment.bottomLeft,
+                child: Padding(
+                  // Move a bit towards center to visually match the extended
+                  // button on the right.
+                  padding: const EdgeInsets.only(left: 28),
+                  child: FloatingActionButton(
+                    heroTag: 'fab-dashboard',
+                    onPressed: _isProcessing
+                        ? null
+                        : () {
+                            context.pushNamed(ProjectDashboardScreen.routeName);
+                          },
+                    tooltip: '项目驾驶舱',
+                    child: const Icon(Icons.dashboard),
+                  ),
+                ),
+              ),
+              Align(
+                alignment: Alignment.bottomRight,
+                child: FloatingActionButton.extended(
+                  heroTag: 'fab-ai-chat',
+                  onPressed: _isProcessing
+                      ? null
+                      : () {
+                          context.pushNamed(AiChatScreen.routeName);
+                        },
+                  icon: const Icon(Icons.chat_bubble_outline),
+                  label: const Text('AI问答'),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
       body: Padding(
         padding: const EdgeInsets.all(16),
