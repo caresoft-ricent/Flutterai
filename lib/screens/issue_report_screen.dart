@@ -10,6 +10,7 @@ import '../services/gemma_multimodal_service.dart';
 import '../services/online_vision_service.dart';
 import '../services/last_inspection_location_service.dart';
 import '../services/network_service.dart';
+import '../services/backend_api_service.dart';
 import '../services/speech_service.dart';
 import '../services/tts_service.dart';
 import '../services/gemma_service.dart';
@@ -23,6 +24,7 @@ import '../widgets/photo_preview.dart';
 import 'camera_capture_screen.dart';
 import 'acceptance_guide_screen.dart';
 import 'home_screen.dart';
+import 'records_screen.dart';
 
 class IssueReportScreen extends ConsumerStatefulWidget {
   static const routeName = 'issue-report';
@@ -50,7 +52,10 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
 
   bool _listening = false;
   bool _aiAnalyzing = false;
+  bool _submitting = false;
   bool _autoCaptureTriggered = false;
+
+  bool? _backendReachable;
 
   String? _photoPath;
 
@@ -283,6 +288,9 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
   String _unit = '项目部';
   String _owner = '木易';
 
+  String? _selectedLibraryId;
+  String? _clientIssueId;
+
   // Used to avoid self-reinforcing matches: when the description field only
   // contains the last auto-filled indicator, do not feed it back into
   // candidate selection/matching for the next photo.
@@ -335,6 +343,7 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
   void initState() {
     super.initState();
     unawaited(_ensureDefectLibraryLoaded());
+    unawaited(_probeBackend());
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -342,6 +351,15 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
       if (_autoCaptureTriggered) return;
       _autoCaptureTriggered = true;
       unawaited(_takePhoto());
+    });
+  }
+
+  Future<void> _probeBackend() async {
+    final backend = ref.read(backendApiServiceProvider);
+    final ok = await backend.health();
+    if (!mounted) return;
+    setState(() {
+      _backendReachable = ok;
     });
   }
 
@@ -516,6 +534,7 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
   }
 
   void _applyEntryDefaults(DefectLibraryEntry e) {
+    _selectedLibraryId = e.id;
     _division = e.division;
     _subDivision = e.subDivision;
     _item = e.item;
@@ -1179,7 +1198,91 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
 
   void _save() {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('已保存到本地（模拟）')),
+      const SnackBar(content: Text('已暂存到本地（模拟）')),
+    );
+  }
+
+  void _resetAfterSubmit() {
+    setState(() {
+      _photoPath = null;
+      _spokenIssueText = '';
+      _lastAutoFilledDesc = '';
+      _clientIssueId = null;
+      _descController.text = '';
+      _descController.selection = const TextSelection.collapsed(offset: 0);
+    });
+  }
+
+  Future<void> _submitToBackend() async {
+    if (_submitting) return;
+    final desc = _descController.text.trim();
+    if (_item.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请先选择分部分项/指标（或用语音匹配）')),
+      );
+      return;
+    }
+    if (desc.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请填写问题描述')),
+      );
+      return;
+    }
+
+    setState(() {
+      _submitting = true;
+    });
+
+    _clientIssueId ??= 'issue-${DateTime.now().millisecondsSinceEpoch}';
+    final backend = ref.read(backendApiServiceProvider);
+
+    int? id;
+    try {
+      final deadlineDays = int.tryParse(_deadline);
+      id = await backend.upsertIssueReport(
+        regionText: _location,
+        division: _division,
+        subDivision: _subDivision,
+        item: _item,
+        indicator: _indicator,
+        description: desc,
+        severity: _level,
+        deadlineDays: deadlineDays,
+        responsibleUnit: _unit,
+        responsiblePerson: _owner,
+        libraryId: _selectedLibraryId,
+        photoPath: _photoPath,
+        clientRecordId: _clientIssueId!,
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _submitting = false;
+        });
+      }
+    }
+
+    if (!mounted) return;
+    if (id == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('提交失败：后端不可用或网络异常')),
+      );
+      return;
+    }
+
+    FocusScope.of(context).unfocus();
+    _resetAfterSubmit();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('已提交到后端（id=$id）'),
+        action: SnackBarAction(
+          label: '返回首页',
+          onPressed: () {
+            if (!mounted) return;
+            context.goNamed(HomeScreen.routeName);
+          },
+        ),
+      ),
     );
   }
 
@@ -1299,6 +1402,16 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
         title: const Text('记录问题'),
         actions: [
           IconButton(
+            onPressed: () {
+              context.pushNamed(
+                RecordsScreen.routeName,
+                queryParameters: const {'tab': 'issue'},
+              );
+            },
+            icon: const Icon(Icons.table_rows),
+            tooltip: '查看记录表',
+          ),
+          IconButton(
             onPressed: () => context.goNamed(HomeScreen.routeName),
             icon: const Icon(Icons.close),
             tooltip: '关闭',
@@ -1358,6 +1471,36 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
           SafeArea(
             child: Column(
               children: [
+                if (_backendReachable != null)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                    child: Row(
+                      children: [
+                        Icon(
+                          _backendReachable!
+                              ? Icons.cloud_done
+                              : Icons.cloud_off,
+                          size: 18,
+                          color: _backendReachable!
+                              ? Theme.of(context).colorScheme.primary
+                              : Theme.of(context).colorScheme.error,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            _backendReachable!
+                                ? '后端已连接（可提交到数据库）'
+                                : '后端未连接（当前只能暂存/提交会失败）',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: _probeBackend,
+                          child: const Text('重试'),
+                        ),
+                      ],
+                    ),
+                  ),
                 Expanded(
                   child: ListView(
                     padding: const EdgeInsets.all(16),
@@ -1542,19 +1685,20 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
                         ),
                         const SizedBox(height: 12),
                       ],
-                      TextField(
-                        controller: _descController,
-                        maxLines: 6,
-                        decoration: const InputDecoration(
-                          labelText: '问题描述',
-                          border: OutlineInputBorder(),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
                       OutlinedButton.icon(
                         onPressed: _aiAnalyzing ? null : _toggleVoiceToText,
                         icon: Icon(_listening ? Icons.stop : Icons.mic),
                         label: Text(_listening ? '停止' : '语音转文字'),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _descController,
+                        minLines: 2,
+                        maxLines: 2,
+                        decoration: const InputDecoration(
+                          labelText: '问题描述',
+                          border: OutlineInputBorder(),
+                        ),
                       ),
                     ],
                   ),
@@ -1574,7 +1718,9 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
                         const SizedBox(width: 12),
                         Expanded(
                           child: FilledButton(
-                            onPressed: _save,
+                            onPressed: (_aiAnalyzing || _submitting)
+                                ? null
+                                : _submitToBackend,
                             child: const Text('保存'),
                           ),
                         ),

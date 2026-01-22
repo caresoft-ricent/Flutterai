@@ -11,6 +11,7 @@ import '../models/target.dart';
 import '../services/defect_library_service.dart';
 import '../services/online_vision_service.dart';
 import '../services/gemma_multimodal_service.dart';
+import '../services/backend_api_service.dart';
 import '../services/offline_cache_service.dart';
 import '../services/database_service.dart';
 import '../services/procedure_acceptance_library_service.dart';
@@ -23,6 +24,7 @@ import '../utils/constants.dart';
 import 'camera_capture_screen.dart';
 import 'home_screen.dart';
 import 'issue_report_screen.dart';
+import 'records_screen.dart';
 
 class AcceptanceGuideScreen extends ConsumerStatefulWidget {
   static const routeName = 'acceptance-guide';
@@ -76,6 +78,94 @@ class _AcceptanceGuideScreenState extends ConsumerState<AcceptanceGuideScreen> {
     if (t.isNotEmpty) return t;
     final name = widget.region?.name;
     return (name == null || name.trim().isEmpty) ? '未知位置' : name.trim();
+  }
+
+  String _normalizeRegionText(String raw) {
+    final s = raw.trim().replaceAll('／', '/');
+    if (s.isEmpty) return s;
+
+    // If already uses '/', keep as-is (normalize spaces).
+    if (s.contains('/')) {
+      return s
+          .split('/')
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty)
+          .join(' / ');
+    }
+
+    // Handle common compact forms like "1栋8层" or "2#3层".
+    final compact = s.replaceAll(' ', '');
+    final b = RegExp(r'(\d+)(?:栋|楼|#)').firstMatch(compact);
+    final f = RegExp(r'(\d+)(?:层|楼)').firstMatch(compact);
+    if (b != null || f != null) {
+      final parts = <String>[];
+      if (b != null) parts.add('${b.group(1)}栋');
+      if (f != null) parts.add('${f.group(1)}层');
+      final rest = compact
+          .replaceAll(RegExp(r'(\d+)(?:栋|楼|#)'), '')
+          .replaceAll(RegExp(r'(\d+)(?:层|楼)'), '')
+          .trim();
+      if (rest.isNotEmpty) parts.add(rest);
+      return parts.join(' / ');
+    }
+
+    return s;
+  }
+
+  Future<void> _ensureCanonicalRegionTextFromRegion(Region? region) async {
+    final r = region;
+    if (r == null) return;
+
+    // Virtual region (not in local DB)
+    if (r.idCode.startsWith('virtual:')) {
+      final name = r.name.trim();
+      final normalized = _normalizeRegionText(name);
+      if (normalized.isNotEmpty) {
+        _regionController.text = normalized;
+      }
+      return;
+    }
+
+    final db = ref.read(databaseServiceProvider);
+
+    // Climb up the parent chain to build a stable, query-friendly location.
+    final names = <String>[];
+    Region? cur = r;
+    final visited = <String>{};
+    while (cur != null) {
+      final code = cur.idCode.trim();
+      if (code.isNotEmpty) {
+        if (visited.contains(code)) break;
+        visited.add(code);
+      }
+
+      final n = cur.name.trim();
+      if (n.isNotEmpty) names.add(n);
+
+      final parent = cur.parentIdCode.trim();
+      if (parent.isEmpty) break;
+      cur = await db.getRegionByCode(parent);
+    }
+
+    if (names.isEmpty) return;
+
+    // Drop project/phase prefixes; keep from first "楼栋" node.
+    final chain =
+        names.reversed.map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+    int start = chain.indexWhere(
+      (e) => RegExp(r'^\d+\s*(?:栋|楼|#)$').hasMatch(e.replaceAll(' ', '')),
+    );
+    if (start < 0) {
+      // Some datasets may store "1栋(一期)" etc; try a looser match.
+      start = chain.indexWhere(
+        (e) => RegExp(r'(?:\d+)(?:栋|楼|#)').hasMatch(e.replaceAll(' ', '')),
+      );
+    }
+    final effective = start >= 0 ? chain.sublist(start) : chain;
+    final path = _normalizeRegionText(effective.join(' / '));
+    if (path.isNotEmpty) {
+      _regionController.text = path;
+    }
   }
 
   LibraryItem? _findLibraryOptionByCode(String? code) {
@@ -180,6 +270,7 @@ class _AcceptanceGuideScreenState extends ConsumerState<AcceptanceGuideScreen> {
     super.initState();
     _regionController = TextEditingController(text: widget.region?.name ?? '');
     _listController.addListener(_handleListScroll);
+    unawaited(_ensureCanonicalRegionTextFromRegion(widget.region));
     _bootstrap();
   }
 
@@ -301,6 +392,7 @@ class _AcceptanceGuideScreenState extends ConsumerState<AcceptanceGuideScreen> {
       if (library != null) {
         if (region != null) {
           _regionController.text = region.name;
+          await _ensureCanonicalRegionTextFromRegion(region);
         }
         await tts.speak('已为您匹配到$_regionText 的 ${library.name}，开始验收。');
         final effective = await _prefillSelectionFromLibrary(library);
@@ -619,6 +711,7 @@ class _AcceptanceGuideScreenState extends ConsumerState<AcceptanceGuideScreen> {
   Future<void> _onResultSelected(
       TargetItem target, AcceptanceResult result) async {
     final cache = ref.read(offlineCacheServiceProvider);
+    final backend = ref.read(backendApiServiceProvider);
     final tts = ref.read(ttsServiceProvider);
 
     final library = _currentLibrary;
@@ -637,6 +730,21 @@ class _AcceptanceGuideScreenState extends ConsumerState<AcceptanceGuideScreen> {
     final id = await cache.saveRecord(record);
     _records[target.idCode] = record.copyWith(id: id);
     _results[target.idCode] = result;
+
+    unawaited(() async {
+      final serverId = await backend.upsertAcceptanceRecord(
+        record: record,
+        library: library,
+        target: target,
+        division: _selectedCategory,
+        subdivision: _selectedSubcategory,
+        ai: _aiResults[target.idCode],
+        localId: id,
+      );
+      if (serverId != null) {
+        await cache.markUploaded(id);
+      }
+    }());
 
     if (!mounted) return;
     setState(() {});
@@ -681,7 +789,7 @@ class _AcceptanceGuideScreenState extends ConsumerState<AcceptanceGuideScreen> {
       }
 
       final tts = ref.read(ttsServiceProvider);
-      await tts.speak('本次验收已完成，数据已本地保存，返回主界面继续。');
+      await tts.speak('本次验收已完成，数据已本地保存，并将尝试同步到后端。');
       if (!mounted) return;
       context.goNamed(HomeScreen.routeName);
     } finally {
@@ -696,6 +804,7 @@ class _AcceptanceGuideScreenState extends ConsumerState<AcceptanceGuideScreen> {
   Future<void> _takePhoto(TargetItem target) async {
     try {
       final tts = ref.read(ttsServiceProvider);
+      final backend = ref.read(backendApiServiceProvider);
       final path = await CameraCaptureScreen.capture(context);
       if (!mounted || path == null || path.isEmpty) return;
 
@@ -771,6 +880,22 @@ class _AcceptanceGuideScreenState extends ConsumerState<AcceptanceGuideScreen> {
 
         await cache.updateRecord(updated);
         _records[target.idCode] = updated;
+
+        final localId = updated.id;
+        unawaited(() async {
+          final serverId = await backend.upsertAcceptanceRecord(
+            record: updated,
+            library: _currentLibrary,
+            target: target,
+            division: _selectedCategory,
+            subdivision: _selectedSubcategory,
+            ai: _aiResults[target.idCode],
+            localId: localId,
+          );
+          if (serverId != null && localId != null) {
+            await cache.markUploaded(localId);
+          }
+        }());
       }
 
       await tts.speak('照片已保存。');
@@ -792,6 +917,7 @@ class _AcceptanceGuideScreenState extends ConsumerState<AcceptanceGuideScreen> {
     Future<void> confirmAllQualified() async {
       if (_targets.isEmpty || _currentLibrary == null) return;
       final cache = ref.read(offlineCacheServiceProvider);
+      final backend = ref.read(backendApiServiceProvider);
       final tts = ref.read(ttsServiceProvider);
       final library = _currentLibrary;
       final now = DateTime.now();
@@ -815,6 +941,21 @@ class _AcceptanceGuideScreenState extends ConsumerState<AcceptanceGuideScreen> {
             );
             final id = await cache.saveRecord(record);
             _records[target.idCode] = record.copyWith(id: id);
+
+            unawaited(() async {
+              final serverId = await backend.upsertAcceptanceRecord(
+                record: record,
+                library: library,
+                target: target,
+                division: _selectedCategory,
+                subdivision: _selectedSubcategory,
+                ai: _aiResults[target.idCode],
+                localId: id,
+              );
+              if (serverId != null) {
+                await cache.markUploaded(id);
+              }
+            }());
           } else {
             final updated = AcceptanceRecord(
               id: existing.id,
@@ -832,6 +973,22 @@ class _AcceptanceGuideScreenState extends ConsumerState<AcceptanceGuideScreen> {
             );
             await cache.updateRecord(updated);
             _records[target.idCode] = updated;
+
+            final localId = updated.id;
+            unawaited(() async {
+              final serverId = await backend.upsertAcceptanceRecord(
+                record: updated,
+                library: library,
+                target: target,
+                division: _selectedCategory,
+                subdivision: _selectedSubcategory,
+                ai: _aiResults[target.idCode],
+                localId: localId,
+              );
+              if (serverId != null && localId != null) {
+                await cache.markUploaded(localId);
+              }
+            }());
           }
           _results[target.idCode] = AcceptanceResult.qualified;
         }
@@ -851,6 +1008,18 @@ class _AcceptanceGuideScreenState extends ConsumerState<AcceptanceGuideScreen> {
       appBar: AppBar(
         title: const Text('工序验收'),
         actions: [
+          IconButton(
+            onPressed: _submitting
+                ? null
+                : () {
+                    context.pushNamed(
+                      RecordsScreen.routeName,
+                      queryParameters: const {'tab': 'acceptance'},
+                    );
+                  },
+            icon: const Icon(Icons.table_rows),
+            tooltip: '查看记录表',
+          ),
           IconButton(
             onPressed: _submitting
                 ? null

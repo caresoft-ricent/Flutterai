@@ -7,8 +7,13 @@ import 'screens/acceptance_guide_screen.dart';
 import 'screens/issue_report_screen.dart';
 import 'screens/supervision_check_screen.dart';
 import 'screens/panorama_inspection_screen.dart';
+import 'screens/backend_settings_screen.dart';
+import 'screens/records_screen.dart';
+import 'screens/project_dashboard_screen.dart';
+import 'screens/ai_chat_screen.dart';
 import 'models/region.dart';
 import 'models/library.dart';
+import 'models/backend_records.dart';
 
 final _routerProvider = Provider<GoRouter>((ref) {
   return GoRouter(
@@ -51,6 +56,54 @@ final _routerProvider = Provider<GoRouter>((ref) {
         path: '/panorama-inspection',
         name: PanoramaInspectionScreen.routeName,
         builder: (context, state) => const PanoramaInspectionScreen(),
+      ),
+      GoRoute(
+        path: '/settings/backend',
+        name: BackendSettingsScreen.routeName,
+        builder: (context, state) => const BackendSettingsScreen(),
+      ),
+      GoRoute(
+        path: '/records',
+        name: RecordsScreen.routeName,
+        builder: (context, state) {
+          final tab = state.uri.queryParameters['tab']?.trim().toLowerCase();
+          final initialIndex = tab == 'issue' ? 1 : 0;
+          return RecordsScreen(initialTabIndex: initialIndex);
+        },
+      ),
+      GoRoute(
+        path: '/records/acceptance/:id',
+        name: AcceptanceRecordDetailScreen.routeName,
+        builder: (context, state) {
+          final extra = state.extra;
+          if (extra is AcceptanceRecordGroup) {
+            return AcceptanceRecordDetailScreen(group: extra);
+          }
+          if (extra is BackendAcceptanceRecord) {
+            return AcceptanceRecordDetailScreen(
+              group: AcceptanceRecordGroup.single(extra),
+            );
+          }
+          throw StateError('Missing acceptance record extra');
+        },
+      ),
+      GoRoute(
+        path: '/records/issue/:id',
+        name: IssueReportDetailScreen.routeName,
+        builder: (context, state) {
+          final r = state.extra as BackendIssueReport;
+          return IssueReportDetailScreen(report: r);
+        },
+      ),
+      GoRoute(
+        path: '/dashboard',
+        name: ProjectDashboardScreen.routeName,
+        builder: (context, state) => const ProjectDashboardScreen(),
+      ),
+      GoRoute(
+        path: '/ai-chat',
+        name: AiChatScreen.routeName,
+        builder: (context, state) => const AiChatScreen(),
       ),
     ],
   );

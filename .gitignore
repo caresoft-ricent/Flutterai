@@ -36,6 +36,13 @@ migrate_working_dir/
 # Local secrets (do not commit)
 /lib/app_local_secrets.dart
 
+# Local backend sqlite db (do not commit)
+/flutterai.db
+/backend/flutterai.db
+
+# Local backend config (do not commit)
+/backend/config.json
+
 # Symbolication related
 app.*.symbols
 
