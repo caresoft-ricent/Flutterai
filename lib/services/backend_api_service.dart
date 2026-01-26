@@ -10,17 +10,20 @@ import '../models/backend_records.dart';
 import '../models/library.dart';
 import '../models/target.dart';
 import '../services/online_vision_service.dart';
+import 'app_locale_controller.dart';
+import 'locale_service.dart';
 
 final backendApiServiceProvider = Provider<BackendApiService>((ref) {
-  return BackendApiService();
+  return BackendApiService(ref);
 });
 
 class BackendApiService {
+  final Ref _ref;
   late final Dio _dio;
 
   static const _prefsKeyBaseUrl = 'backend_base_url';
 
-  BackendApiService() {
+  BackendApiService(this._ref) {
     _dio = Dio(
       BaseOptions(
         baseUrl: _baseUrl(),
@@ -29,6 +32,9 @@ class BackendApiService {
         sendTimeout: const Duration(seconds: 8),
         headers: {
           'Content-Type': 'application/json',
+          'Accept-Language': LocaleService.acceptLanguageHeader(
+            _ref.read(appLocaleControllerProvider).valueOrNull,
+          ),
         },
       ),
     );
@@ -86,11 +92,15 @@ class BackendApiService {
     return _normalizeBaseUrl(v);
   }
 
-  Future<void> _refreshRuntimeBaseUrl() async {
+  Future<void> _refreshRuntimeOptions() async {
     final effective = await getEffectiveBaseUrl();
     if (_dio.options.baseUrl != effective) {
       _dio.options.baseUrl = effective;
     }
+
+    final locale = _ref.read(appLocaleControllerProvider).valueOrNull;
+    _dio.options.headers['Accept-Language'] =
+        LocaleService.acceptLanguageHeader(locale);
   }
 
   Future<String?> _uploadPhotoIfNeeded(String? path) async {
@@ -125,7 +135,7 @@ class BackendApiService {
     }
 
     try {
-      await _refreshRuntimeBaseUrl();
+      await _refreshRuntimeOptions();
       final filename =
           p.split('/').isNotEmpty ? p.split('/').last : 'photo.jpg';
       final form = FormData.fromMap({
@@ -173,7 +183,7 @@ class BackendApiService {
   }
 
   Future<void> ensureProject() async {
-    await _refreshRuntimeBaseUrl();
+    await _refreshRuntimeOptions();
     try {
       await _dio.post(
         '/v1/projects/ensure',
@@ -187,7 +197,7 @@ class BackendApiService {
   }
 
   Future<bool> health() async {
-    await _refreshRuntimeBaseUrl();
+    await _refreshRuntimeOptions();
     try {
       final resp = await _dio.get('/v1/health');
       final data = resp.data;
@@ -263,7 +273,7 @@ class BackendApiService {
   Future<List<BackendAcceptanceRecord>> listAcceptanceRecords({
     int limit = 200,
   }) async {
-    await _refreshRuntimeBaseUrl();
+    await _refreshRuntimeOptions();
     final resp = await _dio.get(
       '/v1/acceptance-records',
       queryParameters: {
@@ -333,7 +343,7 @@ class BackendApiService {
   Future<List<BackendIssueReport>> listIssueReports({
     int limit = 200,
   }) async {
-    await _refreshRuntimeBaseUrl();
+    await _refreshRuntimeOptions();
     final resp = await _dio.get(
       '/v1/issue-reports',
       queryParameters: {
@@ -351,7 +361,7 @@ class BackendApiService {
   }
 
   Future<BackendIssueReport?> getIssueReport(int id) async {
-    await _refreshRuntimeBaseUrl();
+    await _refreshRuntimeOptions();
     try {
       final resp = await _dio.get('/v1/issue-reports/$id');
       final data = resp.data;
@@ -365,7 +375,7 @@ class BackendApiService {
   }
 
   Future<List<BackendRectificationAction>> listIssueActions(int issueId) async {
-    await _refreshRuntimeBaseUrl();
+    await _refreshRuntimeOptions();
     final resp = await _dio.get('/v1/issue-reports/$issueId/actions');
     final data = resp.data;
     if (data is! List) return const [];
@@ -385,7 +395,7 @@ class BackendApiService {
     String? actorRole,
     String? actorName,
   }) async {
-    await _refreshRuntimeBaseUrl();
+    await _refreshRuntimeOptions();
     final uploaded = await _uploadPhotosIfNeeded(photoPaths);
     try {
       final resp = await _dio.post(
@@ -413,7 +423,7 @@ class BackendApiService {
     String? actorRole,
     String? actorName,
   }) async {
-    await _refreshRuntimeBaseUrl();
+    await _refreshRuntimeOptions();
     final uploaded = await _uploadPhotosIfNeeded(photoPaths);
     try {
       final resp = await _dio.post(
@@ -437,7 +447,7 @@ class BackendApiService {
   Future<List<BackendRectificationAction>> listAcceptanceActions(
     int recordId,
   ) async {
-    await _refreshRuntimeBaseUrl();
+    await _refreshRuntimeOptions();
     final resp = await _dio.get('/v1/acceptance-records/$recordId/actions');
     final data = resp.data;
     if (data is! List) return const [];
@@ -457,7 +467,7 @@ class BackendApiService {
     String? actorRole,
     String? actorName,
   }) async {
-    await _refreshRuntimeBaseUrl();
+    await _refreshRuntimeOptions();
     final uploaded = await _uploadPhotosIfNeeded(photoPaths);
     try {
       final resp = await _dio.post(
@@ -486,7 +496,7 @@ class BackendApiService {
     String? actorRole,
     String? actorName,
   }) async {
-    await _refreshRuntimeBaseUrl();
+    await _refreshRuntimeOptions();
     final uploaded = await _uploadPhotosIfNeeded(photoPaths);
     try {
       final resp = await _dio.post(
@@ -510,7 +520,7 @@ class BackendApiService {
   Future<Map<String, dynamic>> getDashboardSummary({
     int limit = 10,
   }) async {
-    await _refreshRuntimeBaseUrl();
+    await _refreshRuntimeOptions();
     final resp = await _dio.get(
       '/v1/dashboard/summary',
       queryParameters: {
@@ -530,7 +540,7 @@ class BackendApiService {
     int timeRangeDays = 14,
     String? building,
   }) async {
-    await _refreshRuntimeBaseUrl();
+    await _refreshRuntimeOptions();
     final resp = await _dio.get(
       '/v1/dashboard/focus',
       queryParameters: {
@@ -549,7 +559,7 @@ class BackendApiService {
   }
 
   Future<Map<String, dynamic>> getAiStatus() async {
-    await _refreshRuntimeBaseUrl();
+    await _refreshRuntimeOptions();
     final resp = await _dio.get('/v1/ai/status');
     final data = resp.data;
     if (data is Map<String, dynamic>) return data;
@@ -563,7 +573,7 @@ class BackendApiService {
     required String query,
     List<Map<String, String>>? messages,
   }) async {
-    await _refreshRuntimeBaseUrl();
+    await _refreshRuntimeOptions();
     final resp = await _dio.post(
       '/v1/ai/chat',
       data: {

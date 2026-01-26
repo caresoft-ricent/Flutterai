@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../l10n/context_l10n.dart';
 import '../services/backend_api_service.dart';
 import 'ai_chat_screen.dart';
 
@@ -46,9 +47,10 @@ class _ProjectDashboardScreenState
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('项目驾驶舱'),
+        title: Text(l10n.dashboardTitle),
         leading: IconButton(
           onPressed: () {
             if (context.canPop()) {
@@ -58,20 +60,20 @@ class _ProjectDashboardScreenState
             }
           },
           icon: const Icon(Icons.arrow_back),
-          tooltip: '返回',
+          tooltip: l10n.commonBack,
         ),
         actions: [
           IconButton(
             onPressed: _reload,
             icon: const Icon(Icons.refresh),
-            tooltip: '刷新',
+            tooltip: l10n.tooltipRefresh,
           ),
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => context.pushNamed(AiChatScreen.routeName),
         icon: const Icon(Icons.chat_bubble_outline),
-        label: const Text('AI问答'),
+        label: Text(l10n.aiChatTitle),
       ),
       body: SafeArea(
         child: RefreshIndicator(
@@ -87,12 +89,12 @@ class _ProjectDashboardScreenState
                   physics: const AlwaysScrollableScrollPhysics(),
                   padding: const EdgeInsets.all(16),
                   children: [
-                    Text('加载失败：${snap.error}'),
+                    Text(l10n.commonLoadFailed('${snap.error}')),
                     const SizedBox(height: 12),
                     OutlinedButton.icon(
                       onPressed: _reload,
                       icon: const Icon(Icons.refresh),
-                      label: const Text('重试'),
+                      label: Text(l10n.commonRetry),
                     ),
                   ],
                 );
@@ -156,7 +158,7 @@ class _ProjectDashboardScreenState
                 padding: const EdgeInsets.all(16),
                 children: [
                   Text(
-                    '质量概览',
+                    l10n.dashboardSectionQualityOverview,
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                   const SizedBox(height: 8),
@@ -165,7 +167,7 @@ class _ProjectDashboardScreenState
                       Expanded(
                         child: _kpiCard(
                           context,
-                          title: '验收分项',
+                          title: l10n.dashboardKpiAcceptanceItems,
                           value: aTotal.toString(),
                         ),
                       ),
@@ -173,7 +175,7 @@ class _ProjectDashboardScreenState
                       Expanded(
                         child: _kpiCard(
                           context,
-                          title: '巡检问题',
+                          title: l10n.dashboardKpiInspectionIssues,
                           value: iTotal.toString(),
                         ),
                       ),
@@ -185,56 +187,62 @@ class _ProjectDashboardScreenState
                       Expanded(
                         child: _kpiCard(
                           context,
-                          title: '验收不合格',
+                          title: l10n.dashboardKpiAcceptanceUnqualified,
                           value: aBadAll.toString(),
                           tone: _Tone.danger,
-                          subtitle: '合格$aOk / 甩项$aPendingAll',
+                          subtitle:
+                              l10n.dashboardSubtitleAcceptanceQualifiedPending(
+                            aOk,
+                            aPendingAll,
+                          ),
                         ),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
                         child: _kpiCard(
                           context,
-                          title: '巡检未闭环',
+                          title: l10n.dashboardKpiInspectionOpen,
                           value: iOpenAll.toString(),
-                          subtitle: '已闭环$iClosed',
+                          subtitle:
+                              l10n.dashboardSubtitleInspectionClosed(iClosed),
                         ),
                       ),
                     ],
                   ),
                   const SizedBox(height: 16),
                   Text(
-                    '未闭环责任单位 Top',
+                    l10n.dashboardSectionTopResponsibleUnits,
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                   const SizedBox(height: 8),
                   if (topUnits.isEmpty)
-                    const Text('暂无数据')
+                    Text(l10n.dashboardNoData)
                   else
                     ...topUnits.take(6).map((e) {
                       final m = asMap(e);
                       final name =
-                          (m['responsible_unit']?.toString() ?? '未填写').trim();
+                          (m['responsible_unit']?.toString() ?? '').trim();
                       final cnt = asInt(m['count']);
                       return ListTile(
                         contentPadding: EdgeInsets.zero,
                         leading: const Icon(Icons.apartment),
-                        title: Text(name.isEmpty ? '未填写' : name),
-                        trailing: Text('$cnt 条'),
+                        title:
+                            Text(name.isEmpty ? l10n.dashboardUnfilled : name),
+                        trailing: Text(l10n.dashboardCountRows(cnt)),
                       );
                     }),
                   const SizedBox(height: 18),
                   const Divider(height: 1),
                   const SizedBox(height: 18),
                   Text(
-                    '近期关注（Focus Pack）',
+                    l10n.dashboardSectionFocusPack,
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                   const SizedBox(height: 4),
                   Text(
                     days > 0 && start.isNotEmpty && end.isNotEmpty
-                        ? '时间窗：近$days天（$start ~ $end）'
-                        : '时间窗：近14天',
+                        ? l10n.dashboardTimeWindow(days, start, end)
+                        : l10n.dashboardTimeWindowDefault,
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                   const SizedBox(height: 8),
@@ -243,31 +251,36 @@ class _ProjectDashboardScreenState
                       Expanded(
                         child: _kpiCard(
                           context,
-                          title: '验收不合格分项',
+                          title: l10n.dashboardKpiAcceptanceUnqualifiedItems,
                           value: aBad.toString(),
                           tone: _Tone.danger,
-                          subtitle: '甩项$aPending',
+                          subtitle:
+                              l10n.dashboardSubtitleAcceptancePending(aPending),
                         ),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
                         child: _kpiCard(
                           context,
-                          title: '巡检未闭环',
+                          title: l10n.dashboardKpiInspectionOpen,
                           value: iOpen.toString(),
-                          subtitle: '严重$iSevere / 逾期$iOverdue',
+                          subtitle:
+                              l10n.dashboardSubtitleInspectionSevereOverdue(
+                            iSevere,
+                            iOverdue,
+                          ),
                         ),
                       ),
                     ],
                   ),
                   const SizedBox(height: 12),
                   Text(
-                    'Top关注点',
+                    l10n.dashboardSectionTopFocus,
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                   const SizedBox(height: 8),
                   if (topFocus.isEmpty)
-                    const Text('暂无足够数据生成关注点')
+                    Text(l10n.dashboardTopFocusNoEnoughData)
                   else
                     ...topFocus.take(5).map((e) {
                       final m = asMap(e);
@@ -278,69 +291,86 @@ class _ProjectDashboardScreenState
                         contentPadding: EdgeInsets.zero,
                         leading: const Icon(Icons.flag_outlined),
                         title: Text(title.isEmpty
-                            ? (building.isEmpty ? '关注点' : building)
+                            ? (building.isEmpty
+                                ? l10n.dashboardTopFocusDefaultTitle
+                                : building)
                             : title),
-                        subtitle:
-                            building.isEmpty ? null : Text('范围：$building'),
-                        trailing: Text('风险$score'),
+                        subtitle: building.isEmpty
+                            ? null
+                            : Text(l10n.dashboardScope(building)),
+                        trailing: Text(l10n.dashboardRiskScore(score)),
                       );
                     }),
                   const SizedBox(height: 12),
                   Text(
-                    '闭环效率',
+                    l10n.dashboardSectionClosureEfficiency,
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                   const SizedBox(height: 8),
                   ListTile(
                     contentPadding: EdgeInsets.zero,
                     leading: const Icon(Icons.timelapse),
-                    title: const Text('巡检关闭时长'),
+                    title: Text(l10n.dashboardIssueCloseDurationTitle),
                     subtitle: Text(
-                      '均值 ${closure['issue_close_days_avg'] ?? '-'} 天 / 中位数 ${closure['issue_close_days_median'] ?? '-'} 天（${asInt(closure['issue_close_count'])} 次）',
+                      l10n.dashboardDurationStats(
+                        '${closure['issue_close_days_avg'] ?? '-'}',
+                        '${closure['issue_close_days_median'] ?? '-'}',
+                        asInt(closure['issue_close_count']),
+                      ),
                     ),
                   ),
                   ListTile(
                     contentPadding: EdgeInsets.zero,
                     leading: const Icon(Icons.verified_outlined),
-                    title: const Text('验收复验时长'),
+                    title: Text(l10n.dashboardAcceptanceVerifyDurationTitle),
                     subtitle: Text(
-                      '均值 ${closure['acceptance_verify_days_avg'] ?? '-'} 天 / 中位数 ${closure['acceptance_verify_days_median'] ?? '-'} 天（${asInt(closure['acceptance_verify_count'])} 次）',
+                      l10n.dashboardDurationStats(
+                        '${closure['acceptance_verify_days_avg'] ?? '-'}',
+                        '${closure['acceptance_verify_days_median'] ?? '-'}',
+                        asInt(closure['acceptance_verify_count']),
+                      ),
                     ),
                   ),
                   const SizedBox(height: 12),
                   Text(
-                    '数据质量',
+                    l10n.dashboardSectionDataQuality,
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                   const SizedBox(height: 8),
                   ListTile(
                     contentPadding: EdgeInsets.zero,
                     leading: const Icon(Icons.data_object),
-                    title: const Text('未解析部位（building）'),
+                    title: Text(l10n.dashboardMissingBuildingTitle),
                     subtitle: Text(
-                      '验收 ${asInt(dq['acceptance_missing_building'])} 条 / 巡检 ${asInt(dq['issues_missing_building'])} 条',
+                      l10n.dashboardMissingBuildingStats(
+                        asInt(dq['acceptance_missing_building']),
+                        asInt(dq['issues_missing_building']),
+                      ),
                     ),
                   ),
                   ListTile(
                     contentPadding: EdgeInsets.zero,
                     leading: const Icon(Icons.warning_amber_outlined),
-                    title: const Text('闭环动作缺失'),
+                    title: Text(l10n.dashboardMissingClosureActionsTitle),
                     subtitle: Text(
-                      '已关闭巡检但无 close 动作 ${asInt(dq['issues_closed_missing_close_action'])} 条；验收缺 verify 动作 ${asInt(dq['acceptance_missing_verify_action'])} 条',
+                      l10n.dashboardMissingClosureActionsStats(
+                        asInt(dq['issues_closed_missing_close_action']),
+                        asInt(dq['acceptance_missing_verify_action']),
+                      ),
                     ),
                   ),
                   const SizedBox(height: 12),
                   Text(
-                    '楼栋风险分布',
+                    l10n.dashboardSectionBuildingRisk,
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                   const SizedBox(height: 8),
                   if (byBuilding.isEmpty)
-                    const Text('暂无楼栋数据')
+                    Text(l10n.dashboardNoBuildingData)
                   else
                     ...byBuilding.take(8).map((e) {
                       final m = asMap(e);
-                      final b = (m['building']?.toString() ?? '未解析').trim();
+                      final b = (m['building']?.toString() ?? '').trim();
                       final score = asInt(m['risk_score']);
                       final open = asInt(m['issues_open']);
                       final unq = asInt(m['acceptance_unqualified_items']);
@@ -348,10 +378,12 @@ class _ProjectDashboardScreenState
                       return ListTile(
                         contentPadding: EdgeInsets.zero,
                         leading: const Icon(Icons.apartment),
-                        title: Text(b.isEmpty ? '未解析' : b),
+                        title: Text(b.isEmpty ? l10n.dashboardUnparsed : b),
                         subtitle: Text(
-                            'open $open / unqItems $unq / overdue $overdue'),
-                        trailing: Text('风险$score'),
+                          l10n.dashboardBuildingRiskSubtitle(
+                              open, unq, overdue),
+                        ),
+                        trailing: Text(l10n.dashboardRiskScore(score)),
                       );
                     }),
                   const SizedBox(height: 60),

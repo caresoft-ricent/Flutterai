@@ -2,6 +2,8 @@ import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'dart:math' as math;
 
+import '../l10n/context_l10n.dart';
+
 class CameraCaptureScreen extends StatefulWidget {
   const CameraCaptureScreen({super.key});
 
@@ -36,7 +38,7 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
     try {
       final cameras = await availableCameras();
       if (cameras.isEmpty) {
-        throw StateError('未检测到可用相机');
+        throw StateError('no-camera');
       }
 
       final controller = CameraController(
@@ -147,12 +149,20 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('拍照失败，请重试')),
+        SnackBar(content: Text(context.l10n.cameraCaptureTakeFailedRetry)),
       );
       setState(() {
         _capturing = false;
       });
     }
+  }
+
+  String _initErrorMessage(BuildContext context, Object? error) {
+    final l10n = context.l10n;
+    if (error is StateError && error.message == 'no-camera') {
+      return l10n.cameraCaptureNoCamera;
+    }
+    return l10n.cameraCaptureInitFailed(error.toString());
   }
 
   @override
@@ -168,12 +178,14 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
   @override
   Widget build(BuildContext context) {
     final controller = _controller;
+    final l10n = context.l10n;
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('拍照'),
+        title: Text(l10n.cameraCaptureTitle),
         leading: IconButton(
           icon: const Icon(Icons.close),
+          tooltip: l10n.commonClose,
           onPressed: () => Navigator.of(context).pop(),
         ),
       ),
@@ -183,11 +195,11 @@ class _CameraCaptureScreenState extends State<CameraCaptureScreen> {
               ? Center(
                   child: Padding(
                     padding: const EdgeInsets.all(16),
-                    child: Text('相机初始化失败：$_initError'),
+                    child: Text(_initErrorMessage(context, _initError)),
                   ),
                 )
               : (controller == null)
-                  ? const Center(child: Text('相机不可用'))
+                  ? Center(child: Text(l10n.cameraCaptureUnavailable))
                   : Stack(
                       children: [
                         Positioned.fill(

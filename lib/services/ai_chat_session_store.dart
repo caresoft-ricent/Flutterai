@@ -46,7 +46,7 @@ class AiChatSession {
 
     return AiChatSession(
       id: id.isEmpty ? _newId() : id,
-      title: title.isEmpty ? '未命名会话' : title,
+      title: title,
       updatedAtMs: updatedAtMs,
       messages: messages,
     );
@@ -69,9 +69,10 @@ class AiChatSession {
   static AiChatSession newSession(
       {String? title, List<Map<String, dynamic>>? seed}) {
     final now = DateTime.now().millisecondsSinceEpoch;
+    final t = (title ?? '').trim();
     return AiChatSession(
       id: _newId(),
-      title: (title ?? '').trim().isEmpty ? '新会话' : title!.trim(),
+      title: t,
       updatedAtMs: now,
       messages: seed ?? const [],
     );
