@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_gen/gen_l10n/app_localizations.dart';
 import 'package:go_router/go_router.dart';
 
+import '../l10n/context_l10n.dart';
 import '../models/library.dart';
 import '../models/region.dart';
 import '../services/database_service.dart';
@@ -14,9 +16,8 @@ import '../services/gemma_multimodal_service.dart';
 import '../services/procedure_acceptance_library_service.dart';
 import '../services/use_gemma_multimodal_service.dart';
 import '../services/use_offline_speech_service.dart';
-import '../utils/constants.dart';
 import 'acceptance_guide_screen.dart';
-import 'backend_settings_screen.dart';
+import 'app_settings_screen.dart';
 import 'issue_report_screen.dart';
 import 'panorama_inspection_screen.dart';
 import 'ai_chat_screen.dart';
@@ -32,14 +33,77 @@ class HomeScreen extends ConsumerStatefulWidget {
   ConsumerState<HomeScreen> createState() => _HomeScreenState();
 }
 
+enum _HomeStatusKind {
+  tapMicToStart,
+  connectingOnlineAsr,
+  listeningSpeakCommand,
+  speaking,
+  onlineUnavailableFallback,
+  asrNotReady,
+  speechModelNotReadyDownloadFirst,
+  speechModelNotReadyWithError,
+  offlineSpeechEnabled,
+  offlineSpeechDisabled,
+  preparingGemmaMultimodal,
+  gemmaMultimodalEnabled,
+  gemmaMultimodalEnableFailedFallback,
+  gemmaMultimodalDisabled,
+  stoppedListening,
+  intentParsing,
+  notMatchedRetry,
+  intentUnrecognizedRetry,
+}
+
 class _HomeScreenState extends ConsumerState<HomeScreen> {
   String _lastInput = '';
   String _partialInput = '';
-  String _status = '点击下方麦克风开始说话';
+  _HomeStatusKind _statusKind = _HomeStatusKind.tapMicToStart;
+  String? _statusArg;
   bool _isProcessing = false;
   bool _isDownloadingModel = false;
 
   String _pendingFinalText = '';
+
+  String _statusText(AppLocalizations l10n) {
+    switch (_statusKind) {
+      case _HomeStatusKind.tapMicToStart:
+        return l10n.homeStatusTapMicToStart;
+      case _HomeStatusKind.connectingOnlineAsr:
+        return l10n.homeStatusConnectingOnlineAsr;
+      case _HomeStatusKind.listeningSpeakCommand:
+        return l10n.homeStatusListeningSpeakCommand;
+      case _HomeStatusKind.speaking:
+        return l10n.homeStatusSpeaking(_statusArg ?? '');
+      case _HomeStatusKind.onlineUnavailableFallback:
+        return l10n.homeStatusOnlineUnavailableFallback;
+      case _HomeStatusKind.asrNotReady:
+        return l10n.homeStatusAsrNotReady;
+      case _HomeStatusKind.speechModelNotReadyDownloadFirst:
+        return l10n.homeStatusSpeechModelNotReadyDownloadFirst;
+      case _HomeStatusKind.speechModelNotReadyWithError:
+        return l10n.homeStatusSpeechModelNotReadyWithError(_statusArg ?? '');
+      case _HomeStatusKind.offlineSpeechEnabled:
+        return l10n.homeStatusOfflineSpeechEnabled;
+      case _HomeStatusKind.offlineSpeechDisabled:
+        return l10n.homeStatusOfflineSpeechDisabled;
+      case _HomeStatusKind.preparingGemmaMultimodal:
+        return l10n.homeStatusPreparingGemmaMultimodal;
+      case _HomeStatusKind.gemmaMultimodalEnabled:
+        return l10n.homeStatusGemmaMultimodalEnabled;
+      case _HomeStatusKind.gemmaMultimodalEnableFailedFallback:
+        return l10n.homeStatusGemmaMultimodalEnableFailedFallback;
+      case _HomeStatusKind.gemmaMultimodalDisabled:
+        return l10n.homeStatusGemmaMultimodalDisabled;
+      case _HomeStatusKind.stoppedListening:
+        return l10n.homeStatusStoppedListening;
+      case _HomeStatusKind.intentParsing:
+        return l10n.homeStatusIntentParsing;
+      case _HomeStatusKind.notMatchedRetry:
+        return l10n.homeStatusNotMatchedRetry;
+      case _HomeStatusKind.intentUnrecognizedRetry:
+        return l10n.homeStatusIntentUnrecognizedRetry;
+    }
+  }
 
   Future<bool> _ensureGemmaMultimodalWithProgress() async {
     if (!mounted) return false;
@@ -58,8 +122,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         context: context,
         barrierDismissible: false,
         builder: (ctx) {
+          final l10n = ctx.l10n;
           return AlertDialog(
-            title: const Text('下载Gemma多模态模型(~3GB)'),
+            title: Text(l10n.homeDownloadGemmaTitle),
             content: ValueListenableBuilder<int>(
               valueListenable: progress,
               builder: (_, v, __) {
@@ -68,11 +133,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('首次启用需要下载离线多模态模型（需要HuggingFace访问授权）。'),
+                    Text(l10n.homeDownloadGemmaBody),
                     const SizedBox(height: 12),
                     LinearProgressIndicator(value: v == 0 ? null : v / 100),
                     const SizedBox(height: 8),
-                    Text('进度：$pct%'),
+                    Text(l10n.homeProgressLabel(pct)),
                   ],
                 );
               },
@@ -137,8 +202,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         context: context,
         barrierDismissible: false,
         builder: (ctx) {
+          final l10n = ctx.l10n;
           return AlertDialog(
-            title: const Text('下载语音模型(~300MB)'),
+            title: Text(l10n.homeDownloadSpeechTitle),
             content: ValueListenableBuilder<double>(
               valueListenable: progress,
               builder: (_, v, __) {
@@ -147,11 +213,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('首次运行需要下载离线语音模型，请保持网络。'),
+                    Text(l10n.homeDownloadSpeechBody),
                     const SizedBox(height: 12),
                     LinearProgressIndicator(value: v == 0 ? null : v),
                     const SizedBox(height: 8),
-                    Text('进度：$pct%'),
+                    Text(l10n.homeProgressLabel(pct)),
                   ],
                 );
               },
@@ -207,12 +273,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final speech = ref.read(speechServiceProvider);
     final useOfflineSpeech = ref.read(useOfflineSpeechProvider);
     final preferOnline = !useOfflineSpeech;
+    final l10n = context.l10n;
 
     // Online-first mode: try Xunfei directly. Only if it fails, fall back to
     // offline init + sherpa.
     if (preferOnline) {
       setState(() {
-        _status = '正在连接在线语音识别…';
+        _statusKind = _HomeStatusKind.connectingOnlineAsr;
+        _statusArg = null;
         _lastInput = '';
         _partialInput = '';
         _pendingFinalText = '';
@@ -225,7 +293,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           if (!mounted) return;
           setState(() {
             _partialInput = partial;
-            _status = '正在说：$partial';
+            _statusKind = _HomeStatusKind.speaking;
+            _statusArg = partial;
           });
         },
         onFinalResult: (text) {
@@ -245,14 +314,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       final ok = await _initSpeechWithProgress();
       if (!ok && mounted) {
         setState(() {
-          _status =
-              (speech.lastInitError == null || speech.lastInitError!.isEmpty)
-                  ? '语音模型未就绪：请先完成模型下载'
-                  : '语音模型未就绪：${speech.lastInitError}';
+          if (speech.lastInitError == null || speech.lastInitError!.isEmpty) {
+            _statusKind = _HomeStatusKind.speechModelNotReadyDownloadFirst;
+            _statusArg = null;
+          } else {
+            _statusKind = _HomeStatusKind.speechModelNotReadyWithError;
+            _statusArg = speech.lastInitError;
+          }
         });
         if (mounted && speech.lastInitError != null) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('模型初始化失败：${speech.lastInitError}')),
+            SnackBar(
+              content: Text(
+                l10n.homeSnackModelInitFailed(speech.lastInitError!),
+              ),
+            ),
           );
         }
         return;
@@ -260,7 +336,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     }
 
     setState(() {
-      _status = '正在监听，请说出验收指令…';
+      _statusKind = _HomeStatusKind.listeningSpeakCommand;
+      _statusArg = null;
       _lastInput = '';
       _partialInput = '';
       _pendingFinalText = '';
@@ -276,7 +353,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         if (!mounted) return;
         setState(() {
           _partialInput = partial;
-          _status = '正在说：$partial';
+          _statusKind = _HomeStatusKind.speaking;
+          _statusArg = partial;
         });
       },
       // Long-press UX: do not auto-finish while finger is still holding.
@@ -292,9 +370,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
     if (!started && mounted) {
       setState(() {
-        _status = preferOnline
-            ? '在线识别不可用，已回落离线：请检查网络/讯飞配置/麦克风权限'
-            : '语音识别未就绪：请允许麦克风权限，并完成模型下载';
+        _statusKind = preferOnline
+            ? _HomeStatusKind.onlineUnavailableFallback
+            : _HomeStatusKind.asrNotReady;
+        _statusArg = null;
       });
     }
   }
@@ -319,7 +398,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       _pendingFinalText = '';
       _partialInput = '';
       _lastInput = finalText;
-      _status = finalText.isEmpty ? '已停止监听' : '识别完成，正在解析意图…';
+      _statusKind = finalText.isEmpty
+          ? _HomeStatusKind.stoppedListening
+          : _HomeStatusKind.intentParsing;
+      _statusArg = null;
       _isProcessing = finalText.isNotEmpty;
     });
 
@@ -339,6 +421,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final procedureLibrary =
         ref.read(procedureAcceptanceLibraryServiceProvider);
     final tts = ref.read(ttsServiceProvider);
+    final l10n = context.l10n;
 
     try {
       final base = await gemma.parseIntent(text);
@@ -367,7 +450,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             : null;
 
         if (region != null && library != null) {
-          await tts.speak('已为您匹配到${region.name} 的 ${library.name}，开始验收引导。');
+          await tts.speak(
+            l10n.homeTtsMatchedStartAcceptance(region.name, library.name),
+          );
 
           if (!mounted) return;
           context.goNamed(
@@ -378,14 +463,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             },
           );
         } else {
-          await tts.speak('未能匹配到分项或位置，请重试。');
+          await tts.speak(l10n.homeTtsNotMatchedRetry);
           if (!mounted) return;
           setState(() {
-            _status = '未匹配到分项或位置，请重试';
+            _statusKind = _HomeStatusKind.notMatchedRetry;
+            _statusArg = null;
           });
         }
       } else if (enriched.intent == 'report_issue') {
-        await tts.speak('检测到问题上报意图，进入问题上报页面。');
+        await tts.speak(l10n.homeTtsEnteringIssueReport);
         if (!mounted) return;
 
         String? extractIssuePhrase(String raw) {
@@ -430,10 +516,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           },
         );
       } else {
-        await tts.speak('暂时无法理解您的指令，请尝试说：我要验收1栋6层的钢筋。');
+        await tts.speak(l10n.homeTtsCannotUnderstandTryExample);
         if (!mounted) return;
         setState(() {
-          _status = '意图无法识别，请重试';
+          _statusKind = _HomeStatusKind.intentUnrecognizedRetry;
+          _statusArg = null;
         });
       }
     } finally {
@@ -447,6 +534,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // NOTE: HomeScreen has lots of runtime strings; we incrementally migrate them to l10n.
+    final l10n = context.l10n;
     final useMultimodal = ref.watch(useGemmaMultimodalProvider);
     final useOfflineSpeech = ref.watch(useOfflineSpeechProvider);
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -454,21 +543,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('河狸云AI - Demo'),
+        title: Text(l10n.homeTitle),
         actions: [
           IconButton(
             onPressed: () {
               context.pushNamed(RecordsScreen.routeName);
             },
             icon: const Icon(Icons.table_rows),
-            tooltip: '记录表',
+            tooltip: l10n.navRecords,
           ),
           IconButton(
             onPressed: () {
-              context.pushNamed(BackendSettingsScreen.routeName);
+              context.pushNamed(AppSettingsScreen.routeName);
             },
             icon: const Icon(Icons.settings),
-            tooltip: '后端设置',
+            tooltip: l10n.navSettings,
           ),
         ],
       ),
@@ -494,7 +583,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         : () {
                             context.pushNamed(ProjectDashboardScreen.routeName);
                           },
-                    tooltip: '项目驾驶舱',
+                    tooltip: l10n.homeTooltipProjectDashboard,
                     child: const Icon(Icons.dashboard),
                   ),
                 ),
@@ -509,7 +598,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                           context.pushNamed(AiChatScreen.routeName);
                         },
                   icon: const Icon(Icons.chat_bubble_outline),
-                  label: const Text('AI问答'),
+                  label: Text(l10n.homeLabelAiChat),
                 ),
               ),
             ],
@@ -531,7 +620,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   children: [
                     Row(
                       children: [
-                        const Expanded(child: Text('启用离线语音识别')),
+                        Expanded(child: Text(l10n.homeToggleOfflineSpeech)),
                         Switch(
                           value: useOfflineSpeech,
                           onChanged: (v) async {
@@ -540,7 +629,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                                 .setEnabled(v);
                             if (!context.mounted) return;
                             setState(() {
-                              _status = v ? '离线语音识别已开启' : '离线语音识别已关闭（使用讯飞在线）';
+                              _statusKind = v
+                                  ? _HomeStatusKind.offlineSpeechEnabled
+                                  : _HomeStatusKind.offlineSpeechDisabled;
+                              _statusArg = null;
                             });
                           },
                         ),
@@ -549,7 +641,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     const Divider(height: 12),
                     Row(
                       children: [
-                        const Expanded(child: Text('启用离线Gemma多模态（图片识别）')),
+                        Expanded(
+                          child: Text(l10n.homeToggleOfflineGemmaMultimodal),
+                        ),
                         Switch(
                           value: useMultimodal,
                           onChanged: _isProcessing
@@ -561,7 +655,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                                   if (v) {
                                     try {
                                       setState(() {
-                                        _status = '正在准备Gemma多模态模型…';
+                                        _statusKind = _HomeStatusKind
+                                            .preparingGemmaMultimodal;
+                                        _statusArg = null;
                                       });
                                       final ok =
                                           await _ensureGemmaMultimodalWithProgress();
@@ -570,7 +666,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                                         await notifier.setEnabled(true);
                                         if (!context.mounted) return;
                                         setState(() {
-                                          _status = 'Gemma多模态已启用';
+                                          _statusKind = _HomeStatusKind
+                                              .gemmaMultimodalEnabled;
+                                          _statusArg = null;
                                         });
                                       }
                                     } catch (e) {
@@ -580,20 +678,26 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                                           .showSnackBar(
                                         SnackBar(
                                           content: Text(
-                                            'Gemma多模态启用失败：$e\n提示：该模型在 HuggingFace 为受限仓库，需要先同意许可并提供 token（--dart-define=HUGGINGFACE_TOKEN=... 或 lib/app_local_secrets.dart:kHuggingfaceToken）。',
+                                            l10n.homeSnackGemmaMultimodalEnableFailed(
+                                              e,
+                                            ),
                                           ),
                                         ),
                                       );
                                       if (!context.mounted) return;
                                       setState(() {
-                                        _status = '多模态启用失败，已回退规则解析';
+                                        _statusKind = _HomeStatusKind
+                                            .gemmaMultimodalEnableFailedFallback;
+                                        _statusArg = null;
                                       });
                                     }
                                   } else {
                                     await notifier.setEnabled(false);
                                     if (!context.mounted) return;
                                     setState(() {
-                                      _status = '多模态已关闭';
+                                      _statusKind = _HomeStatusKind
+                                          .gemmaMultimodalDisabled;
+                                      _statusArg = null;
                                     });
                                   }
                                 },
@@ -615,7 +719,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                             context.goNamed(AcceptanceGuideScreen.routeName);
                           },
                     icon: const Icon(Icons.checklist),
-                    label: const Text('工序验收'),
+                    label: Text(l10n.homeButtonProcedureAcceptance),
                   ),
                 ),
               ],
@@ -631,7 +735,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                             context.go('/daily-inspection');
                           },
                     icon: const Icon(Icons.fact_check),
-                    label: const Text('日常巡检'),
+                    label: Text(l10n.homeButtonDailyInspection),
                   ),
                 ),
               ],
@@ -647,7 +751,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                             context.go('/supervision-check');
                           },
                     icon: const Icon(Icons.assignment_turned_in),
-                    label: const Text('监督检查'),
+                    label: Text(l10n.homeButtonSupervisionCheck),
                   ),
                 ),
               ],
@@ -665,29 +769,33 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                             );
                           },
                     icon: const Icon(Icons.panorama_horizontal),
-                    label: const Text('全景巡检'),
+                    label: Text(l10n.homeButtonPanoramaInspection),
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 16),
             Text(
-              '示例指令',
+              l10n.homeSectionExampleCommands,
               style: Theme.of(context).textTheme.titleLarge,
             ),
             const SizedBox(height: 8),
-            ...DemoConstants.exampleCommands.map(
-              (e) => Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                child: Row(
-                  children: [
-                    const Icon(Icons.mic, size: 18),
-                    const SizedBox(width: 8),
-                    Expanded(child: Text(e)),
-                  ],
+            ...l10n.homeExampleCommands
+                .split('\n')
+                .map((e) => e.trim())
+                .where((e) => e.isNotEmpty)
+                .map(
+                  (e) => Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.mic, size: 18),
+                        const SizedBox(width: 8),
+                        Expanded(child: Text(e)),
+                      ],
+                    ),
+                  ),
                 ),
-              ),
-            ),
             const SizedBox(height: 16),
             Card(
               elevation: 0,
@@ -700,17 +808,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      '当前状态',
+                      l10n.homeSectionCurrentStatus,
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
                     const SizedBox(height: 8),
-                    Text(_status),
+                    Text(_statusText(l10n)),
                     if (_partialInput.isNotEmpty) ...[
                       const SizedBox(height: 8),
                       AnimatedSwitcher(
                         duration: const Duration(milliseconds: 150),
                         child: Text(
-                          '实时识别：$_partialInput',
+                          l10n.homeRealtimeRecognition(_partialInput),
                           key: ValueKey(_partialInput),
                           style: Theme.of(context).textTheme.bodyMedium,
                         ),
@@ -719,7 +827,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     if (_lastInput.isNotEmpty) ...[
                       const SizedBox(height: 8),
                       Text(
-                        '上次识别：$_lastInput',
+                        l10n.homeLastRecognition(_lastInput),
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                     ],
@@ -740,7 +848,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 onTap: () {
                   if (_isProcessing) return;
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('请长按麦克风开始说话，松开结束')),
+                    SnackBar(
+                      content: Text(l10n.homeSnackLongPressMicHint),
+                    ),
                   );
                 },
                 onLongPressStart: (_) async {

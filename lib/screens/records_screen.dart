@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../l10n/context_l10n.dart';
 import '../models/backend_records.dart';
 import '../services/backend_api_service.dart';
 import '../widgets/photo_preview.dart';
@@ -32,23 +33,24 @@ class _RecordsScreenState extends ConsumerState<RecordsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     return DefaultTabController(
       length: 2,
       initialIndex: widget.initialTabIndex.clamp(0, 1),
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('记录表'),
+          title: Text(l10n.navRecords),
           actions: [
             IconButton(
               onPressed: _reload,
               icon: const Icon(Icons.refresh),
-              tooltip: '刷新',
+              tooltip: l10n.tooltipRefresh,
             ),
           ],
-          bottom: const TabBar(
+          bottom: TabBar(
             tabs: [
-              Tab(text: '验收'),
-              Tab(text: '巡检'),
+              Tab(text: l10n.tabAcceptance),
+              Tab(text: l10n.tabInspection),
             ],
           ),
         ),
@@ -78,6 +80,20 @@ class _AcceptanceRecordsList extends ConsumerStatefulWidget {
 class _AcceptanceRecordsListState
     extends ConsumerState<_AcceptanceRecordsList> {
   late Future<List<BackendAcceptanceRecord>> _future;
+
+  String _acceptanceResultLabel(BuildContext context, String raw) {
+    final l10n = context.l10n;
+    switch (raw.trim().toLowerCase()) {
+      case 'qualified':
+        return l10n.acceptanceResultQualified;
+      case 'unqualified':
+        return l10n.acceptanceResultUnqualified;
+      case 'pending':
+        return l10n.acceptanceResultPending;
+      default:
+        return raw.trim().isEmpty ? '—' : raw.trim();
+    }
+  }
 
   Future<List<BackendAcceptanceRecord>> _fetch() async {
     final api = ref.read(backendApiServiceProvider);
@@ -117,7 +133,9 @@ class _AcceptanceRecordsListState
               physics: const AlwaysScrollableScrollPhysics(),
               children: [
                 const SizedBox(height: 60),
-                Center(child: Text('加载失败：${snap.error}')),
+                Center(
+                    child:
+                        Text(context.l10n.commonLoadFailed('${snap.error}'))),
               ],
             );
           }
@@ -125,9 +143,9 @@ class _AcceptanceRecordsListState
           if (items.isEmpty) {
             return ListView(
               physics: const AlwaysScrollableScrollPhysics(),
-              children: const [
-                SizedBox(height: 60),
-                Center(child: Text('暂无验收记录')),
+              children: [
+                const SizedBox(height: 60),
+                Center(child: Text(context.l10n.recordsEmptyAcceptance)),
               ],
             );
           }
@@ -149,14 +167,20 @@ class _AcceptanceRecordsListState
               ].where((e) => e.trim().isNotEmpty).join('｜');
 
               final subtitle = [
-                '结果：${g.overallResultZh}',
-                '指标：合格${c.qualified}/不合格${c.unqualified}/甩项${c.pending}',
-                '时间：${g.latestAt}',
+                context.l10n.recordsSubtitleResult(
+                  _acceptanceResultLabel(context, g.overallResultRaw),
+                ),
+                context.l10n.recordsSubtitleAcceptanceIndicators(
+                  c.qualified,
+                  c.unqualified,
+                  c.pending,
+                ),
+                context.l10n.recordsSubtitleTime('${g.latestAt}'),
               ].join('  ');
 
               return ListTile(
                 title: Text(
-                  title.isEmpty ? '（未命名验收记录）' : title,
+                  title.isEmpty ? context.l10n.recordsUnnamedAcceptance : title,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -194,6 +218,18 @@ class _IssueReportsList extends ConsumerStatefulWidget {
 
 class _IssueReportsListState extends ConsumerState<_IssueReportsList> {
   late Future<List<BackendIssueReport>> _future;
+
+  String _issueSeverityLabel(BuildContext context, String raw) {
+    final l10n = context.l10n;
+    final v = raw.trim();
+    if (v.isEmpty) return '—';
+    final lower = v.toLowerCase();
+    if (lower == 'severe' || v.contains('严重')) return l10n.issueSeveritySevere;
+    if (lower == 'normal' || lower == 'general' || v.contains('一般')) {
+      return l10n.issueSeverityNormal;
+    }
+    return v;
+  }
 
   Future<List<BackendIssueReport>> _fetch() async {
     final api = ref.read(backendApiServiceProvider);
@@ -233,7 +269,9 @@ class _IssueReportsListState extends ConsumerState<_IssueReportsList> {
               physics: const AlwaysScrollableScrollPhysics(),
               children: [
                 const SizedBox(height: 60),
-                Center(child: Text('加载失败：${snap.error}')),
+                Center(
+                    child:
+                        Text(context.l10n.commonLoadFailed('${snap.error}'))),
               ],
             );
           }
@@ -241,9 +279,9 @@ class _IssueReportsListState extends ConsumerState<_IssueReportsList> {
           if (items.isEmpty) {
             return ListView(
               physics: const AlwaysScrollableScrollPhysics(),
-              children: const [
-                SizedBox(height: 60),
-                Center(child: Text('暂无巡检问题')),
+              children: [
+                const SizedBox(height: 60),
+                Center(child: Text(context.l10n.recordsEmptyIssue)),
               ],
             );
           }
@@ -262,13 +300,18 @@ class _IssueReportsListState extends ConsumerState<_IssueReportsList> {
 
               final subtitle = [
                 r.description,
-                if ((r.severity ?? '').trim().isNotEmpty) '严重性：${r.severity}',
-                '时间：${r.clientCreatedAt ?? r.createdAt}',
+                if ((r.severity ?? '').trim().isNotEmpty)
+                  context.l10n.recordsSubtitleSeverity(
+                    _issueSeverityLabel(context, r.severity ?? ''),
+                  ),
+                context.l10n.recordsSubtitleTime(
+                  '${r.clientCreatedAt ?? r.createdAt}',
+                ),
               ].join('  ');
 
               return ListTile(
                 title: Text(
-                  title.isEmpty ? '（未命名巡检记录）' : title,
+                  title.isEmpty ? context.l10n.recordsUnnamedIssue : title,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -305,21 +348,40 @@ class AcceptanceRecordDetailScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
+
+    String acceptanceResultLabel(String raw) {
+      switch (raw.trim().toLowerCase()) {
+        case 'qualified':
+          return l10n.acceptanceResultQualified;
+        case 'unqualified':
+          return l10n.acceptanceResultUnqualified;
+        case 'pending':
+          return l10n.acceptanceResultPending;
+        default:
+          return raw.trim().isEmpty ? '—' : raw.trim();
+      }
+    }
+
     return Scaffold(
-      appBar: AppBar(title: const Text('验收记录详情')),
+      appBar: AppBar(title: Text(l10n.acceptanceRecordDetailTitle)),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            _kv('位置', group.regionText),
-            _kv('分部', group.division ?? ''),
-            _kv('分项', group.subdivision ?? ''),
-            _kv('工序', group.item ?? ''),
-            _kv('综合结果', group.overallResultZh),
-            _kv('时间', group.latestAt.toString()),
+            _kv(context, l10n.commonLocation, group.regionText),
+            _kv(context, l10n.commonDivision, group.division ?? ''),
+            _kv(context, l10n.commonItem, group.subdivision ?? ''),
+            _kv(context, l10n.recordsFieldProcedure, group.item ?? ''),
+            _kv(
+              context,
+              l10n.recordsFieldOverallResult,
+              acceptanceResultLabel(group.overallResultRaw),
+            ),
+            _kv(context, l10n.recordsFieldTime, group.latestAt.toString()),
             const SizedBox(height: 12),
             Text(
-              '指标明细',
+              l10n.recordsSectionIndicators,
               style: Theme.of(context).textTheme.titleMedium,
             ),
             const SizedBox(height: 8),
@@ -337,13 +399,13 @@ class AcceptanceRecordDetailScreen extends StatelessWidget {
                           Expanded(
                             child: Text(
                               (r.indicator ?? '').trim().isEmpty
-                                  ? '（未命名指标）'
+                                  ? l10n.recordsUnnamedIndicator
                                   : r.indicator!.trim(),
                               style: Theme.of(context).textTheme.titleSmall,
                             ),
                           ),
                           Text(
-                            r.resultZh,
+                            acceptanceResultLabel(r.result),
                             style: TextStyle(
                               fontWeight: FontWeight.w700,
                               color:
@@ -363,14 +425,17 @@ class AcceptanceRecordDetailScreen extends StatelessWidget {
                                 onPressed: () async {
                                   await RectificationActionsSheet.open(
                                     context,
-                                    title: '整改闭环（验收记录 #${r.id}）',
+                                    title: l10n
+                                        .recordsRectificationTitleAcceptance(
+                                            r.id),
                                     targetType: 'acceptance',
                                     targetId: r.id,
                                     showVerify: true,
                                   );
                                 },
                                 icon: const Icon(Icons.fact_check),
-                                label: const Text('整改/复验'),
+                                label:
+                                    Text(l10n.recordsRectificationActionVerify),
                               ),
                             ),
                           ],
@@ -378,15 +443,16 @@ class AcceptanceRecordDetailScreen extends StatelessWidget {
                       ],
                       const SizedBox(height: 6),
                       if ((r.remark ?? '').trim().isNotEmpty)
-                        Text('备注：${r.remark!.trim()}'),
+                        Text(l10n.recordsRemark(r.remark!.trim())),
                       const SizedBox(height: 6),
                       Text(
-                        '时间：${(r.clientCreatedAt ?? r.createdAt)}',
+                        l10n.recordsSubtitleTime(
+                            '${(r.clientCreatedAt ?? r.createdAt)}'),
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                       if ((r.clientRecordId ?? '').trim().isNotEmpty)
                         Text(
-                          '幂等ID：${r.clientRecordId}',
+                          l10n.recordsClientRecordId(r.clientRecordId!),
                           style: Theme.of(context).textTheme.bodySmall,
                         ),
                       if ((r.photoPath ?? '').trim().isNotEmpty) ...[
@@ -410,7 +476,7 @@ class AcceptanceRecordDetailScreen extends StatelessWidget {
     );
   }
 
-  Widget _kv(String k, String v) {
+  Widget _kv(BuildContext context, String k, String v) {
     final value = v.trim().isEmpty ? '—' : v.trim();
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
@@ -482,15 +548,58 @@ class _IssueReportDetailScreenState
   }
 
   Future<void> _openRectification() async {
+    final l10n = context.l10n;
     await RectificationActionsSheet.open(
       context,
-      title: '整改闭环（巡检问题 #${_report.id}）',
+      title: l10n.recordsRectificationTitleIssue(_report.id),
       targetType: 'issue',
       targetId: _report.id,
       showClose: _report.status.trim().toLowerCase() != 'closed',
     );
     if (!mounted) return;
     await _refresh();
+  }
+
+  String _issueStatusLabel(BuildContext context, String raw) {
+    final l10n = context.l10n;
+    switch (raw.trim().toLowerCase()) {
+      case 'open':
+        return l10n.issueStatusOpen;
+      case 'closed':
+        return l10n.issueStatusClosed;
+      default:
+        return raw.trim().isEmpty ? '—' : raw.trim();
+    }
+  }
+
+  String _issueSeverityLabel(BuildContext context, String raw) {
+    final l10n = context.l10n;
+    final v = raw.trim();
+    if (v.isEmpty) return '—';
+    final lower = v.toLowerCase();
+    if (lower == 'severe' || v.contains('严重')) return l10n.issueSeveritySevere;
+    if (lower == 'normal' || lower == 'general' || v.contains('一般')) {
+      return l10n.issueSeverityNormal;
+    }
+    return v;
+  }
+
+  String _responsibleUnitLabel(BuildContext context, String raw) {
+    final l10n = context.l10n;
+    final v = raw.trim();
+    if (v.isEmpty) return '—';
+    if (v == '项目部') return l10n.dailyInspectionUnitProjectDept;
+    if (v == '安徽施工') return l10n.dailyInspectionUnitAnhuiConstruction;
+    return v;
+  }
+
+  String _responsibleOwnerLabel(BuildContext context, String raw) {
+    final l10n = context.l10n;
+    final v = raw.trim();
+    if (v.isEmpty) return '—';
+    if (v == '木易') return l10n.dailyInspectionOwnerMuYi;
+    if (v == '冯施工') return l10n.dailyInspectionOwnerFengConstruction;
+    return v;
   }
 
   Widget _kv(String k, String v) {
@@ -515,14 +624,15 @@ class _IssueReportDetailScreenState
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('巡检记录详情'),
+        title: Text(l10n.issueRecordDetailTitle),
         actions: [
           IconButton(
             onPressed: _refreshing ? null : _refresh,
             icon: const Icon(Icons.refresh),
-            tooltip: '刷新',
+            tooltip: l10n.tooltipRefresh,
           ),
         ],
       ),
@@ -530,41 +640,59 @@ class _IssueReportDetailScreenState
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            _kv('ID', _report.id.toString()),
-            _kv('位置', _report.regionText),
-            _kv('栋', _report.buildingNo ?? ''),
-            _kv('层', _report.floorNo?.toString() ?? ''),
-            _kv('区', _report.zone ?? ''),
-            _kv('分部', _report.division ?? ''),
-            _kv('分项', _report.subdivision ?? ''),
-            _kv('问题库ID', _report.libraryId ?? ''),
-            _kv('工序', _report.item ?? ''),
-            _kv('指标', _report.indicator ?? ''),
-            _kv('描述', _report.description),
-            _kv('严重性', _report.severity ?? ''),
-            _kv('整改期限(天)', _report.deadlineDays?.toString() ?? ''),
-            _kv('责任单位', _report.responsibleUnit ?? ''),
-            _kv('责任人', _report.responsiblePerson ?? ''),
-            _kv('状态', _report.status),
+            _kv(l10n.recordsFieldId, _report.id.toString()),
+            _kv(l10n.commonLocation, _report.regionText),
+            _kv(l10n.recordsFieldBuilding, _report.buildingNo ?? ''),
+            _kv(l10n.recordsFieldFloor, _report.floorNo?.toString() ?? ''),
+            _kv(l10n.recordsFieldZone, _report.zone ?? ''),
+            _kv(l10n.commonDivision, _report.division ?? ''),
+            _kv(l10n.commonItem, _report.subdivision ?? ''),
+            _kv(l10n.recordsFieldLibraryId, _report.libraryId ?? ''),
+            _kv(l10n.recordsFieldProcedure, _report.item ?? ''),
+            _kv(l10n.commonIndicator, _report.indicator ?? ''),
+            _kv(l10n.recordsFieldDescription, _report.description),
             _kv(
-              '时间',
+              l10n.recordsFieldSeverity,
+              _issueSeverityLabel(context, _report.severity ?? ''),
+            ),
+            _kv(
+              l10n.recordsFieldDeadlineDays,
+              _report.deadlineDays?.toString() ?? '',
+            ),
+            _kv(
+              l10n.recordsFieldResponsibleUnit,
+              _responsibleUnitLabel(context, _report.responsibleUnit ?? ''),
+            ),
+            _kv(
+              l10n.recordsFieldResponsiblePerson,
+              _responsibleOwnerLabel(
+                context,
+                _report.responsiblePerson ?? '',
+              ),
+            ),
+            _kv(
+              l10n.recordsFieldStatus,
+              _issueStatusLabel(context, _report.status),
+            ),
+            _kv(
+              l10n.recordsFieldTime,
               (_report.clientCreatedAt ?? _report.createdAt).toString(),
             ),
-            _kv('幂等ID', _report.clientRecordId ?? ''),
+            _kv(l10n.recordsFieldClientRecordId, _report.clientRecordId ?? ''),
             const SizedBox(height: 12),
             FilledButton.icon(
               onPressed: _openRectification,
               icon: const Icon(Icons.fact_check),
               label: Text(
                 _report.status.trim().toLowerCase() == 'closed'
-                    ? '查看整改闭环'
-                    : '整改闭环（提交整改/复验关闭）',
+                    ? l10n.recordsRectificationActionView
+                    : l10n.recordsRectificationActionSubmitAndClose,
               ),
             ),
             const SizedBox(height: 12),
             if ((_report.photoPath ?? '').trim().isNotEmpty) ...[
               Text(
-                '照片预览',
+                l10n.recordsSectionPhotoPreview,
                 style: Theme.of(context).textTheme.titleMedium,
               ),
               const SizedBox(height: 8),

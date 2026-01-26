@@ -1,10 +1,12 @@
 import 'dart:convert';
 
+import 'package:flutter/widgets.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/library.dart';
 import '../models/target.dart';
+import '../utils/localized_assets.dart';
 import 'database_service.dart';
 
 final procedureAcceptanceLibraryServiceProvider =
@@ -23,16 +25,24 @@ class ProcedureAcceptanceLibraryService {
   ProcedureAcceptanceLibraryService({required this.dbService});
 
   Future<void>? _loadFuture;
+  Locale? _loadedLocale;
   final List<_ProcedureLibraryItem> _items = [];
   final Map<String, _ProcedureLibraryItem> _byCode = {};
   final Map<String, List<TargetItem>> _targetsByCode = {};
 
-  Future<void> _ensureLoaded() {
-    return _loadFuture ??= _loadFromAssets();
+  Future<void> _ensureLoaded({Locale? locale}) {
+    final effectiveLocale = locale ?? _loadedLocale;
+    if (_loadFuture != null && _loadedLocale == effectiveLocale) {
+      return _loadFuture!;
+    }
+    _loadedLocale = effectiveLocale;
+    return _loadFuture = _loadFromAssets(locale: effectiveLocale);
   }
 
-  Future<void> _loadFromAssets() async {
-    final raw = await rootBundle.loadString(_assetPath);
+  Future<void> _loadFromAssets({Locale? locale}) async {
+    final raw = (locale == null)
+        ? await rootBundle.loadString(_assetPath)
+        : await loadStringLocalized(_assetPath, locale: locale);
     final decoded = json.decode(raw);
     if (decoded is! List) {
       throw StateError('$_assetPath: expected a JSON list');
@@ -153,8 +163,8 @@ class ProcedureAcceptanceLibraryService {
     return (category: hit.cateName, subcategory: hit.childCateName);
   }
 
-  Future<void> ensureLoaded() async {
-    await _ensureLoaded();
+  Future<void> ensureLoaded({Locale? locale}) async {
+    await _ensureLoaded(locale: locale);
   }
 
   Future<List<LibraryItem>> getAllLibraries() async {

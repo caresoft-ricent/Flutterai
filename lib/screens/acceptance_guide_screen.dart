@@ -2,8 +2,10 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_gen/gen_l10n/app_localizations.dart';
 import 'package:go_router/go_router.dart';
 
+import '../l10n/context_l10n.dart';
 import '../models/acceptance_record.dart';
 import '../models/library.dart';
 import '../models/region.dart';
@@ -44,6 +46,9 @@ class AcceptanceGuideScreen extends ConsumerStatefulWidget {
 }
 
 class _AcceptanceGuideScreenState extends ConsumerState<AcceptanceGuideScreen> {
+  late AppLocalizations _l10n;
+  String? _lastLocaleTag;
+
   List<TargetItem> _targets = [];
   bool _loading = true;
   bool _submitting = false;
@@ -77,7 +82,9 @@ class _AcceptanceGuideScreenState extends ConsumerState<AcceptanceGuideScreen> {
     final t = _regionController.text.trim();
     if (t.isNotEmpty) return t;
     final name = widget.region?.name;
-    return (name == null || name.trim().isEmpty) ? '未知位置' : name.trim();
+    return (name == null || name.trim().isEmpty)
+        ? _l10n.commonUnknownLocation
+        : name.trim();
   }
 
   String _normalizeRegionText(String raw) {
@@ -239,16 +246,16 @@ class _AcceptanceGuideScreenState extends ConsumerState<AcceptanceGuideScreen> {
     final content = name.isNotEmpty
         ? name
         : (desc.isEmpty
-            ? '未命名指标'
+            ? _l10n.acceptanceUnnamedIndicator
             : (desc.length > 18 ? desc.substring(0, 18) : desc));
-    await tts.speak('第${index + 1}项：$content。');
+    await tts.speak(_l10n.acceptanceTtsItemPrompt(index + 1, content));
   }
 
   Future<void> _speakNextPromptOrCompletion() async {
     final tts = ref.read(ttsServiceProvider);
     final next = _nextUnansweredIndex();
     if (next == null) {
-      await tts.speak('所有主控项已判定。您可以点击提交。');
+      await tts.speak(_l10n.acceptanceTtsAllAnsweredYouCanSubmit);
       return;
     }
     await _speakTargetPrompt(next);
@@ -257,11 +264,11 @@ class _AcceptanceGuideScreenState extends ConsumerState<AcceptanceGuideScreen> {
   String _resultText(AcceptanceResult r) {
     switch (r) {
       case AcceptanceResult.qualified:
-        return '合格';
+        return _l10n.acceptanceResultQualified;
       case AcceptanceResult.unqualified:
-        return '不合格';
+        return _l10n.acceptanceResultUnqualified;
       case AcceptanceResult.pending:
-        return '甩项';
+        return _l10n.acceptanceResultSkipped;
     }
   }
 
@@ -272,6 +279,32 @@ class _AcceptanceGuideScreenState extends ConsumerState<AcceptanceGuideScreen> {
     _listController.addListener(_handleListScroll);
     unawaited(_ensureCanonicalRegionTextFromRegion(widget.region));
     _bootstrap();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _l10n = context.l10n;
+
+    final locale = Localizations.localeOf(context);
+    final tag = locale.toLanguageTag();
+    if (_lastLocaleTag != tag) {
+      _lastLocaleTag = tag;
+      unawaited(
+        ref
+            .read(procedureAcceptanceLibraryServiceProvider)
+            .ensureLoaded(locale: locale),
+      );
+      unawaited(
+        ref.read(defectLibraryServiceProvider).ensureLoaded(locale: locale),
+      );
+
+      // Refresh categories/libraries/targets when locale changes so the UI
+      // can pick up localized assets if present.
+      if (mounted) {
+        unawaited(_bootstrap());
+      }
+    }
   }
 
   Future<void> _startVoiceSessionListening() async {
@@ -311,7 +344,7 @@ class _AcceptanceGuideScreenState extends ConsumerState<AcceptanceGuideScreen> {
 
     if (!mounted) return;
     if (!ok) {
-      final msg = speech.lastInitError ?? '语音识别启动失败';
+      final msg = speech.lastInitError ?? _l10n.commonSpeechInitFailed;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
     }
   }
@@ -394,7 +427,9 @@ class _AcceptanceGuideScreenState extends ConsumerState<AcceptanceGuideScreen> {
           _regionController.text = region.name;
           await _ensureCanonicalRegionTextFromRegion(region);
         }
-        await tts.speak('已为您匹配到$_regionText 的 ${library.name}，开始验收。');
+        await tts.speak(
+          _l10n.acceptanceTtsMatchedStartAcceptance(_regionText, library.name),
+        );
         final effective = await _prefillSelectionFromLibrary(library);
         await _loadTargetsForLibrary(effective);
         return;
@@ -402,7 +437,7 @@ class _AcceptanceGuideScreenState extends ConsumerState<AcceptanceGuideScreen> {
     }
 
     if (enriched.intent == 'report_issue') {
-      await tts.speak('检测到问题上报意图，进入问题上报页面。');
+      await tts.speak(_l10n.commonTtsEnteringIssueReport);
       if (!mounted) return;
       context.goNamed(IssueReportScreen.routeName, extra: {
         'originText': text,
@@ -411,7 +446,7 @@ class _AcceptanceGuideScreenState extends ConsumerState<AcceptanceGuideScreen> {
       return;
     }
 
-    await tts.speak('未能识别分项，请尝试说：我要验收1栋6层的模板工程。');
+    await tts.speak(_l10n.acceptanceTtsNotRecognizedTryExample);
   }
 
   Future<void> _bootstrap() async {
@@ -560,11 +595,13 @@ class _AcceptanceGuideScreenState extends ConsumerState<AcceptanceGuideScreen> {
 
     if (!speakIntro) return;
     if (targets.isNotEmpty) {
-      await tts.speak('开始验收${library.name}，共有${targets.length}个检查指标。');
+      await tts.speak(
+        _l10n.acceptanceTtsStartAcceptance(library.name, targets.length),
+      );
       await _speakTargetPrompt(0);
       _scrollToIndex(0);
     } else {
-      await tts.speak('未找到该分项的验收指标，请更换分项。');
+      await tts.speak(_l10n.acceptanceTtsNoTargetsChangeLibrary);
     }
   }
 
@@ -595,7 +632,7 @@ class _AcceptanceGuideScreenState extends ConsumerState<AcceptanceGuideScreen> {
         border: const OutlineInputBorder(),
         isDense: true,
       ),
-      hint: const Text('请选择'),
+      hint: Text(_l10n.commonPleaseSelect),
       items: [
         for (final o in options)
           DropdownMenuItem<String>(
@@ -639,7 +676,7 @@ class _AcceptanceGuideScreenState extends ConsumerState<AcceptanceGuideScreen> {
         border: const OutlineInputBorder(),
         isDense: true,
       ),
-      hint: const Text('请选择'),
+      hint: Text(_l10n.commonPleaseSelect),
       items: [
         for (final o in options)
           DropdownMenuItem<LibraryItem>(
@@ -703,9 +740,9 @@ class _AcceptanceGuideScreenState extends ConsumerState<AcceptanceGuideScreen> {
 
   String get _overallResultText {
     if (_targets.isEmpty) return '';
-    if (_unqualifiedCount > 0) return '不合格';
-    if (_allAnswered) return '合格';
-    return '待确认';
+    if (_unqualifiedCount > 0) return _l10n.acceptanceResultUnqualified;
+    if (_allAnswered) return _l10n.acceptanceResultQualified;
+    return _l10n.acceptanceOverallPending;
   }
 
   Future<void> _onResultSelected(
@@ -751,9 +788,11 @@ class _AcceptanceGuideScreenState extends ConsumerState<AcceptanceGuideScreen> {
 
     final chosenText = _resultText(result);
     if (result == AcceptanceResult.unqualified) {
-      await tts.speak('已选择$chosenText，请拍照记录。');
+      await tts.speak(
+        _l10n.acceptanceTtsSelectedPleaseTakePhoto(chosenText),
+      );
     } else {
-      await tts.speak('已选择$chosenText。');
+      await tts.speak(_l10n.acceptanceTtsSelected(chosenText));
     }
 
     if (result == AcceptanceResult.unqualified) {
@@ -780,16 +819,16 @@ class _AcceptanceGuideScreenState extends ConsumerState<AcceptanceGuideScreen> {
     try {
       if (!_allAnswered) {
         final tts = ref.read(ttsServiceProvider);
-        await tts.speak('请先完成所有主控项的判定，再提交。');
+        await tts.speak(_l10n.acceptanceTtsCompleteAllBeforeSubmit);
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('请先完成所有主控项的判定')),
+          SnackBar(content: Text(_l10n.acceptanceSnackCompleteAllBeforeSubmit)),
         );
         return;
       }
 
       final tts = ref.read(ttsServiceProvider);
-      await tts.speak('本次验收已完成，数据已本地保存，并将尝试同步到后端。');
+      await tts.speak(_l10n.acceptanceTtsCompletedSavedWillSync);
       if (!mounted) return;
       context.goNamed(HomeScreen.routeName);
     } finally {
@@ -811,6 +850,7 @@ class _AcceptanceGuideScreenState extends ConsumerState<AcceptanceGuideScreen> {
       final cache = ref.read(offlineCacheServiceProvider);
       final existing = _records[target.idCode];
       if (existing != null) {
+        final locale = Localizations.localeOf(context);
         var updated = existing.copyWith(photoPath: path);
 
         // Optional: offline image recognition remark.
@@ -820,8 +860,8 @@ class _AcceptanceGuideScreenState extends ConsumerState<AcceptanceGuideScreen> {
             final mm = ref.read(gemmaMultimodalServiceProvider);
             final analysis = await mm.analyzeImageAuto(
               path,
-              sceneHint: '工序验收拍照（可能是构件/工艺照片，也可能是铭牌/合格证）',
-              hint: '请结合验收标准，判断是否存在明显问题，并给出简短备注。',
+              sceneHint: _l10n.acceptanceSceneHintPhoto,
+              hint: _l10n.acceptancePhotoHintRemark,
               targetName: target.name,
               targetStandard: target.description,
             );
@@ -835,9 +875,9 @@ class _AcceptanceGuideScreenState extends ConsumerState<AcceptanceGuideScreen> {
         try {
           // 本地问题库候选（assets/defect_library），不涉及后端。
           final defectLibrary = ref.read(defectLibraryServiceProvider);
-          await defectLibrary.ensureLoaded();
+          await defectLibrary.ensureLoaded(locale: locale);
           final candidateQuery = <String>[
-            '工序验收',
+            _l10n.acceptanceTitle,
             _currentLibrary?.name ?? '',
             _regionText,
             target.name,
@@ -853,8 +893,8 @@ class _AcceptanceGuideScreenState extends ConsumerState<AcceptanceGuideScreen> {
           final onlineVision = ref.read(onlineVisionServiceProvider);
           var ai = await onlineVision.analyzeImageAutoStructured(
             path,
-            sceneHint: '工序验收拍照（可能是构件/工艺照片，也可能是铭牌/合格证）',
-            hint: '如果照片不是施工部位或无法判断，请返回 type=irrelevant 并提示重拍。',
+            sceneHint: _l10n.acceptanceSceneHintPhoto,
+            hint: _l10n.acceptancePhotoHintIfIrrelevant,
             defectLibraryCandidateLines: candidateLines,
           );
 
@@ -898,7 +938,7 @@ class _AcceptanceGuideScreenState extends ConsumerState<AcceptanceGuideScreen> {
         }());
       }
 
-      await tts.speak('照片已保存。');
+      await tts.speak(_l10n.commonPhotoSaved);
 
       if (!mounted) return;
       setState(() {});
@@ -910,9 +950,14 @@ class _AcceptanceGuideScreenState extends ConsumerState<AcceptanceGuideScreen> {
   @override
   Widget build(BuildContext context) {
     final regionName = _regionText;
-    final libraryName = _currentLibrary?.name ?? '未选择分项';
-    final batchTitle = '第1批($regionName)';
-    final headerSummary = '演示项目｜新城公司  $libraryName  $regionName';
+    final libraryName =
+        _currentLibrary?.name ?? _l10n.acceptanceNoLibrarySelected;
+    final batchTitle = _l10n.acceptanceBatchTitle(1, regionName);
+    final headerSummary = _l10n.acceptanceHeaderSummary(
+      _l10n.acceptanceDemoProjectTitle,
+      libraryName,
+      regionName,
+    );
 
     Future<void> confirmAllQualified() async {
       if (_targets.isEmpty || _currentLibrary == null) return;
@@ -1001,12 +1046,12 @@ class _AcceptanceGuideScreenState extends ConsumerState<AcceptanceGuideScreen> {
         }
       }
 
-      await tts.speak('已一键确认，全部主控项为合格。');
+      await tts.speak(_l10n.acceptanceTtsConfirmedAllQualified);
     }
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('工序验收'),
+        title: Text(_l10n.acceptanceTitle),
         actions: [
           IconButton(
             onPressed: _submitting
@@ -1018,7 +1063,7 @@ class _AcceptanceGuideScreenState extends ConsumerState<AcceptanceGuideScreen> {
                     );
                   },
             icon: const Icon(Icons.table_rows),
-            tooltip: '查看记录表',
+            tooltip: _l10n.commonViewRecords,
           ),
           IconButton(
             onPressed: _submitting
@@ -1027,7 +1072,7 @@ class _AcceptanceGuideScreenState extends ConsumerState<AcceptanceGuideScreen> {
                     context.goNamed(HomeScreen.routeName);
                   },
             icon: const Icon(Icons.close),
-            tooltip: '关闭',
+            tooltip: _l10n.commonClose,
           ),
         ],
       ),
@@ -1068,7 +1113,7 @@ class _AcceptanceGuideScreenState extends ConsumerState<AcceptanceGuideScreen> {
                                   );
                                 },
                                 icon: const Icon(Icons.expand_more),
-                                tooltip: '展开信息',
+                                tooltip: _l10n.acceptanceTooltipExpandInfo,
                               ),
                             ],
                           )
@@ -1079,7 +1124,7 @@ class _AcceptanceGuideScreenState extends ConsumerState<AcceptanceGuideScreen> {
                                 children: [
                                   Expanded(
                                     child: Text(
-                                      '演示项目｜新城公司',
+                                      _l10n.acceptanceDemoProjectTitle,
                                       style: Theme.of(context)
                                           .textTheme
                                           .titleMedium,
@@ -1101,13 +1146,14 @@ class _AcceptanceGuideScreenState extends ConsumerState<AcceptanceGuideScreen> {
                                       );
                                     },
                                     icon: const Icon(Icons.expand_less),
-                                    tooltip: '收起信息',
+                                    tooltip:
+                                        _l10n.acceptanceTooltipCollapseInfo,
                                   ),
                                   TextButton(
                                     onPressed: (_submitting || _targets.isEmpty)
                                         ? null
                                         : confirmAllQualified,
-                                    child: const Text('一键确认'),
+                                    child: Text(_l10n.acceptanceConfirmAll),
                                   ),
                                 ],
                               ),
@@ -1116,7 +1162,7 @@ class _AcceptanceGuideScreenState extends ConsumerState<AcceptanceGuideScreen> {
                                 children: [
                                   Expanded(
                                     child: _buildCascadingDropdown(
-                                      label: '分部',
+                                      label: _l10n.commonDivision,
                                       value: _selectedCategory,
                                       options: _categories,
                                       onChanged: (v) {
@@ -1128,7 +1174,7 @@ class _AcceptanceGuideScreenState extends ConsumerState<AcceptanceGuideScreen> {
                                   const SizedBox(width: 12),
                                   Expanded(
                                     child: _buildCascadingDropdown(
-                                      label: '子分部',
+                                      label: _l10n.commonSubdivision,
                                       value: _selectedSubcategory,
                                       options: _subcategories,
                                       onChanged: (v) {
@@ -1144,7 +1190,7 @@ class _AcceptanceGuideScreenState extends ConsumerState<AcceptanceGuideScreen> {
                                 children: [
                                   Expanded(
                                     child: _buildLibraryDropdown(
-                                      label: '分项',
+                                      label: _l10n.commonItem,
                                       value: _currentLibrary,
                                       options: _libraries,
                                       onChanged: (v) {
@@ -1156,17 +1202,17 @@ class _AcceptanceGuideScreenState extends ConsumerState<AcceptanceGuideScreen> {
                                   const SizedBox(width: 12),
                                   Expanded(
                                     child: InputDecorator(
-                                      decoration: const InputDecoration(
-                                        labelText: '部位',
-                                        border: OutlineInputBorder(),
+                                      decoration: InputDecoration(
+                                        labelText: _l10n.commonLocation,
+                                        border: const OutlineInputBorder(),
                                         isDense: true,
                                       ),
                                       child: TextFormField(
                                         controller: _regionController,
-                                        decoration: const InputDecoration(
+                                        decoration: InputDecoration(
                                           isDense: true,
                                           border: InputBorder.none,
-                                          hintText: '请输入',
+                                          hintText: _l10n.commonPleaseInput,
                                         ),
                                         onChanged: (_) {
                                           if (!mounted) return;
@@ -1192,12 +1238,15 @@ class _AcceptanceGuideScreenState extends ConsumerState<AcceptanceGuideScreen> {
                                     onPressed: () {
                                       ScaffoldMessenger.of(context)
                                           .showSnackBar(
-                                        const SnackBar(
-                                          content: Text('查看图纸（占位）'),
+                                        SnackBar(
+                                          content: Text(
+                                            _l10n
+                                                .acceptanceSnackViewDrawingPlaceholder,
+                                          ),
                                         ),
                                       );
                                     },
-                                    child: const Text('查看图纸'),
+                                    child: Text(_l10n.acceptanceViewDrawing),
                                   ),
                                 ],
                               ),
@@ -1213,18 +1262,19 @@ class _AcceptanceGuideScreenState extends ConsumerState<AcceptanceGuideScreen> {
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              const Text('请先在上方选择分部/子分部/分项\n或长按下方麦克风用语音选择'),
+                              Text(_l10n.acceptanceHintSelectOrLongPressMic),
                               if (_voicePartial.isNotEmpty) ...[
                                 const SizedBox(height: 8),
                                 Text(
-                                  '实时识别：$_voicePartial',
+                                  _l10n
+                                      .commonRealtimeRecognition(_voicePartial),
                                   style: Theme.of(context).textTheme.bodyMedium,
                                 ),
                               ],
                               if (_voiceLast.isNotEmpty) ...[
                                 const SizedBox(height: 8),
                                 Text(
-                                  '上次识别：$_voiceLast',
+                                  _l10n.commonLastRecognition(_voiceLast),
                                   style: Theme.of(context).textTheme.bodySmall,
                                 ),
                               ],
@@ -1232,14 +1282,14 @@ class _AcceptanceGuideScreenState extends ConsumerState<AcceptanceGuideScreen> {
                           ),
                         )
                       : _targets.isEmpty
-                          ? const Center(child: Text('未找到该分项的验收指标'))
+                          ? Center(child: Text(_l10n.acceptanceNoTargets))
                           : ListView(
                               controller: _listController,
                               padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
                               children: [
                                 const SizedBox(height: 12),
                                 Text(
-                                  '主控项',
+                                  _l10n.acceptanceSectionPrimaryControls,
                                   style:
                                       Theme.of(context).textTheme.titleMedium,
                                 ),
@@ -1261,14 +1311,18 @@ class _AcceptanceGuideScreenState extends ConsumerState<AcceptanceGuideScreen> {
                                   children: [
                                     Expanded(
                                       child: Text(
-                                        '有 $_unqualifiedCount 条主控项不合格',
+                                        _l10n.acceptanceUnqualifiedCount(
+                                          _unqualifiedCount,
+                                        ),
                                         style: Theme.of(context)
                                             .textTheme
                                             .bodyMedium,
                                       ),
                                     ),
                                     Text(
-                                      '总体结果 $_overallResultText',
+                                      _l10n.acceptanceOverallResult(
+                                        _overallResultText,
+                                      ),
                                       style: Theme.of(context)
                                           .textTheme
                                           .titleSmall,
@@ -1289,8 +1343,10 @@ class _AcceptanceGuideScreenState extends ConsumerState<AcceptanceGuideScreen> {
                               onTap: () {
                                 if (_voiceProcessing) return;
                                 ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('请长按麦克风开始说话，松开结束'),
+                                  SnackBar(
+                                    content: Text(
+                                      _l10n.commonSnackLongPressMicHint,
+                                    ),
                                   ),
                                 );
                               },
@@ -1346,7 +1402,7 @@ class _AcceptanceGuideScreenState extends ConsumerState<AcceptanceGuideScreen> {
                                       : () {
                                           context.goNamed(HomeScreen.routeName);
                                         },
-                                  child: const Text('返回'),
+                                  child: Text(_l10n.commonBack),
                                 ),
                               ),
                               const SizedBox(width: 12),
@@ -1357,15 +1413,16 @@ class _AcceptanceGuideScreenState extends ConsumerState<AcceptanceGuideScreen> {
                                       : () {
                                           ScaffoldMessenger.of(context)
                                               .showSnackBar(
-                                            const SnackBar(
-                                              content: Text('已暂存（本地）'),
+                                            SnackBar(
+                                              content: Text(
+                                                _l10n.commonSnackSavedLocally,
+                                              ),
                                             ),
                                           );
-                                          ref
-                                              .read(ttsServiceProvider)
-                                              .speak('已暂存到本地。');
+                                          ref.read(ttsServiceProvider).speak(
+                                              _l10n.commonTtsSavedLocally);
                                         },
-                                  child: const Text('暂存'),
+                                  child: Text(_l10n.commonSaveDraft),
                                 ),
                               ),
                               const SizedBox(width: 12),
@@ -1373,7 +1430,11 @@ class _AcceptanceGuideScreenState extends ConsumerState<AcceptanceGuideScreen> {
                                 child: FilledButton(
                                   onPressed:
                                       _submitting ? null : _submitAndReturnHome,
-                                  child: Text(_submitting ? '提交中…' : '提交'),
+                                  child: Text(
+                                    _submitting
+                                        ? _l10n.commonSubmitting
+                                        : _l10n.commonSubmit,
+                                  ),
                                 ),
                               ),
                             ],
@@ -1421,6 +1482,7 @@ class _AcceptanceTargetCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final theme = Theme.of(context);
     final highlightColor = theme.colorScheme.primaryContainer;
     final a = analysis;
@@ -1438,7 +1500,7 @@ class _AcceptanceTargetCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              name.isEmpty ? '未命名指标' : name,
+              name.isEmpty ? l10n.acceptanceUnnamedIndicator : name,
               style: theme.textTheme.titleSmall,
             ),
             if (desc.isNotEmpty) ...[
@@ -1464,21 +1526,21 @@ class _AcceptanceTargetCard extends StatelessWidget {
               children: [
                 Expanded(
                   child: _resultButton(
-                    label: '合格',
+                    label: l10n.acceptanceResultQualified,
                     result: AcceptanceResult.qualified,
                   ),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
                   child: _resultButton(
-                    label: '不合格',
+                    label: l10n.acceptanceResultUnqualified,
                     result: AcceptanceResult.unqualified,
                   ),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
                   child: _resultButton(
-                    label: '甩项',
+                    label: l10n.acceptanceResultSkipped,
                     result: AcceptanceResult.pending,
                   ),
                 ),
@@ -1511,20 +1573,22 @@ class _AcceptanceAiPanel extends StatelessWidget {
 
   const _AcceptanceAiPanel({required this.result});
 
-  String _severityText(String v) {
+  String _severityText(BuildContext context, String v) {
+    final l10n = context.l10n;
     switch (v.trim().toLowerCase()) {
       case 'high':
-        return '高';
+        return l10n.commonSeverityHigh;
       case 'medium':
-        return '中';
+        return l10n.commonSeverityMedium;
       case 'low':
       default:
-        return '低';
+        return l10n.commonSeverityLow;
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     final theme = Theme.of(context);
     final type = result.type.trim();
 
@@ -1537,7 +1601,7 @@ class _AcceptanceAiPanel extends StatelessWidget {
           borderRadius: BorderRadius.circular(12),
         ),
         child: Text(
-          '请拍摄施工部位',
+          l10n.acceptanceAiHintTakeConstructionPhoto,
           style: theme.textTheme.bodyMedium,
         ),
       );
@@ -1555,26 +1619,38 @@ class _AcceptanceAiPanel extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              result.summary.trim().isEmpty ? '发现问题' : result.summary.trim(),
+              result.summary.trim().isEmpty
+                  ? l10n.acceptanceAiFoundIssue
+                  : result.summary.trim(),
               style: theme.textTheme.bodyMedium,
             ),
             const SizedBox(height: 8),
             Text(
-              '缺陷类型：${result.defectType.trim().isEmpty ? '未给出' : result.defectType.trim()}',
+              l10n.acceptanceAiDefectTypeLine(
+                result.defectType.trim().isEmpty
+                    ? l10n.commonNotProvided
+                    : result.defectType.trim(),
+              ),
               style: theme.textTheme.bodySmall,
             ),
             Text(
-              '严重程度：${_severityText(result.severity)}',
+              l10n.acceptanceAiSeverityLine(
+                _severityText(context, result.severity),
+              ),
               style: theme.textTheme.bodySmall,
             ),
             Text(
-              '整改建议：${result.rectifySuggestion.trim().isEmpty ? '未给出' : result.rectifySuggestion.trim()}',
+              l10n.acceptanceAiRectifySuggestionLine(
+                result.rectifySuggestion.trim().isEmpty
+                    ? l10n.commonNotProvided
+                    : result.rectifySuggestion.trim(),
+              ),
               style: theme.textTheme.bodySmall,
             ),
             if (result.matchedHistory) ...[
               const SizedBox(height: 8),
               Text(
-                '已匹配历史问题',
+                l10n.acceptanceAiMatchedHistory,
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.primary,
                 ),
@@ -1595,7 +1671,7 @@ class _AcceptanceAiPanel extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
       ),
       child: Text(
-        summary.isEmpty ? '未能判定，请重试。' : summary,
+        summary.isEmpty ? l10n.commonCannotDetermineRetry : summary,
         style: theme.textTheme.bodyMedium,
       ),
     );
@@ -1656,7 +1732,11 @@ class _CollapsibleTextState extends State<_CollapsibleText> {
                       _expanded = !_expanded;
                     });
                   },
-                  child: Text(_expanded ? '收起' : '展开'),
+                  child: Text(
+                    _expanded
+                        ? context.l10n.commonCollapse
+                        : context.l10n.commonExpand,
+                  ),
                 ),
               ),
           ],

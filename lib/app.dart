@@ -1,19 +1,23 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_gen/gen_l10n/app_localizations.dart';
 import 'package:go_router/go_router.dart';
 
+import 'l10n/context_l10n.dart';
 import 'screens/home_screen.dart';
 import 'screens/acceptance_guide_screen.dart';
 import 'screens/issue_report_screen.dart';
 import 'screens/supervision_check_screen.dart';
 import 'screens/panorama_inspection_screen.dart';
 import 'screens/backend_settings_screen.dart';
+import 'screens/app_settings_screen.dart';
 import 'screens/records_screen.dart';
 import 'screens/project_dashboard_screen.dart';
 import 'screens/ai_chat_screen.dart';
 import 'models/region.dart';
 import 'models/library.dart';
 import 'models/backend_records.dart';
+import 'services/app_locale_controller.dart';
 
 final _routerProvider = Provider<GoRouter>((ref) {
   return GoRouter(
@@ -61,6 +65,11 @@ final _routerProvider = Provider<GoRouter>((ref) {
         path: '/settings/backend',
         name: BackendSettingsScreen.routeName,
         builder: (context, state) => const BackendSettingsScreen(),
+      ),
+      GoRoute(
+        path: '/settings',
+        name: AppSettingsScreen.routeName,
+        builder: (context, state) => const AppSettingsScreen(),
       ),
       GoRoute(
         path: '/records',
@@ -115,10 +124,38 @@ class AcceptanceApp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final router = ref.watch(_routerProvider);
+    final localeOverride = ref.watch(appLocaleControllerProvider).valueOrNull;
 
     return MaterialApp.router(
-      title: '河狸云工序验收(离线 Demo)',
+      onGenerateTitle: (ctx) => ctx.l10n.appTitle,
       themeMode: ThemeMode.system,
+      locale: localeOverride,
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
+      localeResolutionCallback: (deviceLocale, supportedLocales) {
+        // If user explicitly picked a locale, always use it.
+        if (localeOverride != null) return localeOverride;
+        // Default: follow system locale with best-effort match.
+        if (deviceLocale == null) return supportedLocales.first;
+
+        // Normalize zh variants (especially for script=Hant).
+        final lang = deviceLocale.languageCode;
+        final script = deviceLocale.scriptCode;
+        if (lang == 'zh') {
+          if (script == 'Hant') {
+            return const Locale.fromSubtags(
+                languageCode: 'zh', scriptCode: 'Hant');
+          }
+          return const Locale('zh');
+        }
+        if (lang == 'ar') return const Locale('ar');
+        if (lang == 'en') return const Locale('en');
+
+        return supportedLocales.firstWhere(
+          (l) => l.languageCode == deviceLocale.languageCode,
+          orElse: () => supportedLocales.first,
+        );
+      },
       theme: ThemeData(
         useMaterial3: true,
         colorSchemeSeed: Colors.blue,

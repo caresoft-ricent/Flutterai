@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../l10n/context_l10n.dart';
 import '../services/backend_api_service.dart';
 import '../services/ai_chat_session_store.dart';
 import '../services/speech_service.dart';
@@ -35,13 +36,7 @@ class _AiChatScreenState extends ConsumerState<AiChatScreen> {
   late final SpeechService _speech;
   late final TtsService _tts;
 
-  final List<_ChatMessage> _messages = [
-    const _ChatMessage(
-      role: _Role.assistant,
-      text:
-          '你可以自由问：\n- 项目进展如何？按楼栋总结并解释原因\n- 为什么巡检未闭环多？风险点在哪里\n- 给出整改优先级和下一步建议\n（我会基于已落库的验收/巡检事实回答）',
-    ),
-  ];
+  final List<_ChatMessage> _messages = [];
 
   Map<String, dynamic>? _lastMeta;
 
@@ -67,6 +62,7 @@ class _AiChatScreenState extends ConsumerState<AiChatScreen> {
 
   Future<void> _initSession() async {
     try {
+      final l10n = context.l10n;
       final sessions = await AiChatSessionStore.loadAll();
       final cur = await AiChatSessionStore.getCurrentId();
       final match = cur == null
@@ -89,7 +85,7 @@ class _AiChatScreenState extends ConsumerState<AiChatScreen> {
 
       final seed = _messages.map((m) => m.toJson()).toList(growable: false);
       final created = await AiChatSessionStore.upsert(
-        AiChatSession.newSession(title: '新会话', seed: seed),
+        AiChatSession.newSession(title: l10n.aiChatNewSessionTitle, seed: seed),
       );
       if (!mounted) return;
       setState(() {
@@ -108,29 +104,36 @@ class _AiChatScreenState extends ConsumerState<AiChatScreen> {
     final loaded = session.messages
         .map((m) => _ChatMessage.fromJson(m))
         .where((m) => m.text.trim().isNotEmpty)
+        .where((m) => !_isSeedMessageText(m.text))
         .toList(growable: false);
 
     _messages
       ..clear()
-      ..addAll(loaded.isEmpty
-          ? const [
-              _ChatMessage(
-                role: _Role.assistant,
-                text:
-                    '你可以自由问：\n- 项目进展如何？按楼栋总结并解释原因\n- 为什么巡检未闭环多？风险点在哪里\n- 给出整改优先级和下一步建议\n（我会基于已落库的验收/巡检事实回答）',
-              ),
-            ]
-          : loaded);
+      ..addAll(loaded);
     _lastMeta = null;
   }
 
+  bool _isSeedMessageText(String text) {
+    final t = text.trim();
+    if (t.isEmpty) return false;
+    return t.startsWith('你可以自由问：') ||
+        t.startsWith('You can ask freely:') ||
+        t.startsWith('يمكنك أن تسأل بحرية');
+  }
+
+  _ChatMessage _seedMessage(BuildContext context) {
+    final l10n = context.l10n;
+    return _ChatMessage(role: _Role.assistant, text: l10n.aiChatSeedMessage);
+  }
+
   String _deriveSessionTitle() {
+    final l10n = context.l10n;
     final firstUser = _messages.firstWhere(
       (m) => m.role == _Role.user && m.text.trim().isNotEmpty,
       orElse: () => const _ChatMessage(role: _Role.user, text: ''),
     );
     final t = firstUser.text.trim();
-    if (t.isEmpty) return '新会话';
+    if (t.isEmpty) return l10n.aiChatNewSessionTitle;
     return t.length > 16 ? '${t.substring(0, 16)}…' : t;
   }
 
@@ -148,24 +151,17 @@ class _AiChatScreenState extends ConsumerState<AiChatScreen> {
   }
 
   Future<void> _createNewSession() async {
-    final seed = <Map<String, dynamic>>[
-      const _ChatMessage(
-        role: _Role.assistant,
-        text:
-            '你可以自由问：\n- 项目进展如何？按楼栋总结并解释原因\n- 为什么巡检未闭环多？风险点在哪里\n- 给出整改优先级和下一步建议\n（我会基于已落库的验收/巡检事实回答）',
-      ).toJson(),
-    ];
+    final l10n = context.l10n;
+    const seed = <Map<String, dynamic>>[];
     final created = await AiChatSessionStore.upsert(
-      AiChatSession.newSession(title: '新会话', seed: seed),
+      AiChatSession.newSession(title: l10n.aiChatNewSessionTitle, seed: seed),
     );
     if (!mounted) return;
     setState(() {
       _sessionId = created.id;
       _sending = false;
       _lastMeta = null;
-      _messages
-        ..clear()
-        ..addAll(seed.map((m) => _ChatMessage.fromJson(m)));
+      _messages.clear();
     });
     await _scrollToBottom();
   }
@@ -209,19 +205,20 @@ class _AiChatScreenState extends ConsumerState<AiChatScreen> {
             await _loadSessionById(id);
           },
           onDelete: (id) async {
+            final l10n = context.l10n;
             final ok = await showDialog<bool>(
                   context: context,
                   builder: (ctx) => AlertDialog(
-                    title: const Text('删除会话？'),
-                    content: const Text('删除后无法恢复。'),
+                    title: Text(l10n.aiChatDeleteSessionTitle),
+                    content: Text(l10n.aiChatDeleteSessionBody),
                     actions: [
                       TextButton(
                         onPressed: () => Navigator.of(ctx).pop(false),
-                        child: const Text('取消'),
+                        child: Text(l10n.commonCancel),
                       ),
                       FilledButton(
                         onPressed: () => Navigator.of(ctx).pop(true),
-                        child: const Text('删除'),
+                        child: Text(l10n.commonDelete),
                       ),
                     ],
                   ),
@@ -229,7 +226,7 @@ class _AiChatScreenState extends ConsumerState<AiChatScreen> {
                 false;
             if (!ok) return;
             await AiChatSessionStore.deleteById(id);
-            if (!mounted) return;
+            if (!context.mounted) return;
             Navigator.of(context).pop();
             await _initSession();
           },
@@ -238,9 +235,9 @@ class _AiChatScreenState extends ConsumerState<AiChatScreen> {
     );
   }
 
-  Future<void> _showUserMessageActions(_ChatMessage m) async {
-    // ignore: use_build_context_synchronously
-    await showModalBottomSheet<void>(
+  void _showUserMessageActions(_ChatMessage m) {
+    final l10n = context.l10n;
+    showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
       builder: (context) {
@@ -250,19 +247,19 @@ class _AiChatScreenState extends ConsumerState<AiChatScreen> {
             children: [
               ListTile(
                 leading: const Icon(Icons.copy),
-                title: const Text('复制'),
+                title: Text(l10n.commonCopy),
                 onTap: () async {
                   await Clipboard.setData(ClipboardData(text: m.text));
                   if (!context.mounted) return;
                   Navigator.of(context).pop();
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('已复制到剪贴板')),
+                    SnackBar(content: Text(l10n.commonCopiedToClipboard)),
                   );
                 },
               ),
               ListTile(
                 leading: const Icon(Icons.edit),
-                title: const Text('编辑并重新发送'),
+                title: Text(l10n.aiChatEditAndResend),
                 onTap: () {
                   Navigator.of(context).pop();
                   _controller.text = m.text;
@@ -325,7 +322,7 @@ class _AiChatScreenState extends ConsumerState<AiChatScreen> {
 
     if (!mounted) return;
     if (!ok) {
-      final msg = speech.lastInitError ?? '语音识别启动失败';
+      final msg = speech.lastInitError ?? context.l10n.commonSpeechInitFailed;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
       setState(() {
         _voiceProcessing = false;
@@ -391,7 +388,7 @@ class _AiChatScreenState extends ConsumerState<AiChatScreen> {
 
     try {
       final api = ref.read(backendApiServiceProvider);
-      final turns = _messages.skip(1).toList(growable: false);
+      final turns = _messages.toList(growable: false);
       final start = turns.length > 12 ? turns.length - 12 : 0;
       final sliced = turns.sublist(start);
       final history = sliced
@@ -436,7 +433,7 @@ class _AiChatScreenState extends ConsumerState<AiChatScreen> {
         _messages.add(
           _ChatMessage(
             role: _Role.assistant,
-            text: answer.isEmpty ? '（空响应）' : answer,
+            text: answer.isEmpty ? context.l10n.aiChatEmptyResponse : answer,
             meta: metaLine(),
           ),
         );
@@ -450,7 +447,7 @@ class _AiChatScreenState extends ConsumerState<AiChatScreen> {
         _messages.add(
           _ChatMessage(
             role: _Role.assistant,
-            text: '请求失败：$e',
+            text: context.l10n.aiChatRequestFailed(e.toString()),
           ),
         );
       });
@@ -477,9 +474,10 @@ class _AiChatScreenState extends ConsumerState<AiChatScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('AI问答'),
+        title: Text(l10n.aiChatTitle),
         leading: IconButton(
           onPressed: () {
             if (context.canPop()) {
@@ -489,23 +487,23 @@ class _AiChatScreenState extends ConsumerState<AiChatScreen> {
             }
           },
           icon: const Icon(Icons.arrow_back),
-          tooltip: '返回',
+          tooltip: l10n.commonBack,
         ),
         actions: [
           IconButton(
             onPressed: _sessionLoading ? null : _showSessionSheet,
             icon: const Icon(Icons.history),
-            tooltip: '历史会话',
+            tooltip: l10n.aiChatTooltipHistory,
           ),
           IconButton(
             onPressed: _sessionLoading ? null : _createNewSession,
             icon: const Icon(Icons.add_comment_outlined),
-            tooltip: '新会话',
+            tooltip: l10n.aiChatTooltipNewSession,
           ),
           IconButton(
             onPressed: () => context.push('/dashboard'),
             icon: const Icon(Icons.dashboard),
-            tooltip: '项目驾驶舱',
+            tooltip: l10n.homeTooltipProjectDashboard,
           ),
           IconButton(
             onPressed: () async {
@@ -523,14 +521,14 @@ class _AiChatScreenState extends ConsumerState<AiChatScreen> {
                 showDialog<void>(
                   context: context,
                   builder: (context) => AlertDialog(
-                    title: const Text('大模型状态'),
+                    title: Text(l10n.aiChatModelStatusTitle),
                     content: Text(
                       'configured: $configured\nmodel: ${model.isEmpty ? '-' : model}\n\n$note',
                     ),
                     actions: [
                       TextButton(
                         onPressed: () => Navigator.of(context).pop(),
-                        child: const Text('关闭'),
+                        child: Text(l10n.commonClose),
                       ),
                     ],
                   ),
@@ -538,12 +536,14 @@ class _AiChatScreenState extends ConsumerState<AiChatScreen> {
               } catch (e) {
                 if (!context.mounted) return;
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('获取大模型状态失败：$e')),
+                  SnackBar(
+                      content:
+                          Text(l10n.aiChatGetModelStatusFailed(e.toString()))),
                 );
               }
             },
             icon: const Icon(Icons.info_outline),
-            tooltip: '大模型状态',
+            tooltip: l10n.aiChatTooltipModelStatus,
           ),
         ],
       ),
@@ -564,9 +564,9 @@ class _AiChatScreenState extends ConsumerState<AiChatScreen> {
                   keyboardDismissBehavior:
                       ScrollViewKeyboardDismissBehavior.onDrag,
                   padding: const EdgeInsets.all(16),
-                  itemCount: _messages.length,
+                  itemCount: _messages.length + 1,
                   itemBuilder: (context, i) {
-                    final m = _messages[i];
+                    final m = i == 0 ? _seedMessage(context) : _messages[i - 1];
                     final isUser = m.role == _Role.user;
                     final cs = Theme.of(context).colorScheme;
 
@@ -623,7 +623,8 @@ class _AiChatScreenState extends ConsumerState<AiChatScreen> {
                   GestureDetector(
                     onTap: () {
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('请长按麦克风开始说话，松开结束')),
+                        SnackBar(
+                            content: Text(l10n.commonSnackLongPressMicHint)),
                       );
                     },
                     onLongPressStart: (_) async {
@@ -674,8 +675,10 @@ class _AiChatScreenState extends ConsumerState<AiChatScreen> {
                       enabled: !_sending,
                       decoration: InputDecoration(
                         hintText: _listening
-                            ? (_voicePartial.isEmpty ? '正在聆听…' : _voicePartial)
-                            : '输入问题…',
+                            ? (_voicePartial.isEmpty
+                                ? l10n.aiChatHintListening
+                                : _voicePartial)
+                            : l10n.aiChatHintAskQuestion,
                         border: OutlineInputBorder(),
                       ),
                       textInputAction: TextInputAction.send,
@@ -685,7 +688,8 @@ class _AiChatScreenState extends ConsumerState<AiChatScreen> {
                   const SizedBox(width: 10),
                   FilledButton(
                     onPressed: _sending ? null : () => _send(speakReply: false),
-                    child: Text(_sending ? '发送中…' : '发送'),
+                    child:
+                        Text(_sending ? l10n.aiChatSending : l10n.aiChatSend),
                   ),
                 ],
               ),
@@ -752,6 +756,7 @@ class _SessionSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final l10n = context.l10n;
     return SafeArea(
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -760,24 +765,27 @@ class _SessionSheet extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
             child: Row(
               children: [
-                const Expanded(
+                Expanded(
                   child: Text(
-                    '历史会话',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                    l10n.aiChatSessionsTitle,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
                 TextButton.icon(
                   onPressed: onNew,
                   icon: const Icon(Icons.add),
-                  label: const Text('新会话'),
+                  label: Text(l10n.aiChatTooltipNewSession),
                 ),
               ],
             ),
           ),
           if (sessions.isEmpty)
-            const Padding(
+            Padding(
               padding: EdgeInsets.fromLTRB(16, 10, 16, 18),
-              child: Text('暂无历史会话'),
+              child: Text(l10n.aiChatSessionsEmpty),
             )
           else
             Flexible(
@@ -788,6 +796,9 @@ class _SessionSheet extends StatelessWidget {
                 itemBuilder: (context, i) {
                   final s = sessions[i];
                   final isCurrent = s.id == currentId;
+                  final title = s.title.trim().isEmpty
+                      ? l10n.aiChatUntitledSession
+                      : s.title;
                   final dt = DateTime.fromMillisecondsSinceEpoch(s.updatedAtMs);
                   final time =
                       '${dt.year.toString().padLeft(4, '0')}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')} '
@@ -799,14 +810,14 @@ class _SessionSheet extends StatelessWidget {
                           : Icons.chat_bubble,
                       color: isCurrent ? cs.primary : null,
                     ),
-                    title: Text(s.title),
+                    title: Text(title),
                     subtitle: Text(time),
                     trailing: IconButton(
                       onPressed: () async {
                         await onDelete(s.id);
                       },
                       icon: const Icon(Icons.delete_outline),
-                      tooltip: '删除',
+                      tooltip: l10n.commonDelete,
                     ),
                     onTap: () async {
                       await onOpen(s.id);

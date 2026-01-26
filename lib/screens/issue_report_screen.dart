@@ -3,8 +3,10 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_gen/gen_l10n/app_localizations.dart';
 import 'package:go_router/go_router.dart';
 
+import '../l10n/context_l10n.dart';
 import '../services/defect_library_service.dart';
 import '../services/gemma_multimodal_service.dart';
 import '../services/online_vision_service.dart';
@@ -47,7 +49,25 @@ enum _VoiceConfirmAction {
   cancel,
 }
 
+enum _IssueSeverity {
+  normal,
+  severe,
+}
+
+enum _ResponsibleUnit {
+  projectDept,
+  anhuiConstruction,
+}
+
+enum _ResponsibleOwner {
+  muYi,
+  fengConstruction,
+}
+
 class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
+  late AppLocalizations _l10n;
+  String? _lastLocaleTag;
+
   final _descController = TextEditingController();
 
   bool _listening = false;
@@ -159,7 +179,7 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
 
     if (!mounted) return;
     if (!ok) {
-      final msg = speech.lastInitError ?? '语音识别启动失败';
+      final msg = speech.lastInitError ?? _l10n.commonSpeechInitFailed;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
     }
   }
@@ -238,8 +258,13 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
           : null;
 
       if (library != null) {
+        final regionName =
+            region?.name ?? enriched.regionText ?? _l10n.commonCurrentLocation;
         await tts.speak(
-          '已为您匹配到${region?.name ?? enriched.regionText ?? '当前位置'} 的 ${library.name}，进入工序验收。',
+          _l10n.dailyInspectionTtsMatchedStartAcceptance(
+            regionName,
+            library.name,
+          ),
         );
         if (!mounted) return;
         context.goNamed(
@@ -267,14 +292,14 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
           );
           _spokenIssueText = spoken.trim();
         });
-        await tts.speak('已为您填写问题描述，请继续选择分部分项或拍照。');
+        await tts.speak(_l10n.dailyInspectionTtsPrefilledDescriptionContinue);
       } else {
-        await tts.speak('已进入巡检，请继续描述问题或选择分部分项。');
+        await tts.speak(_l10n.dailyInspectionTtsEnteredContinue);
       }
       return;
     }
 
-    await tts.speak('暂时无法理解您的指令，请尝试说：1栋6层发现模板开裂。');
+    await tts.speak(_l10n.dailyInspectionTtsCannotUnderstandTryExample);
   }
 
   String _division = '';
@@ -282,11 +307,11 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
   String _item = '';
   String _indicator = '';
 
-  String _level = '一般';
+  _IssueSeverity _severity = _IssueSeverity.normal;
   String _deadline = '3';
 
-  String _unit = '项目部';
-  String _owner = '木易';
+  _ResponsibleUnit _unit = _ResponsibleUnit.projectDept;
+  _ResponsibleOwner _owner = _ResponsibleOwner.muYi;
 
   String? _selectedLibraryId;
   String? _clientIssueId;
@@ -298,10 +323,40 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
 
   List<DefectLibraryEntry> _defectOptions = const [];
 
-  static const _unitOptions = <String>['项目部', '安徽施工'];
-  static const _ownerOptions = <String>['木易', '冯施工'];
-  static const _levelOptions = <String>['一般', '严重'];
   static const _deadlineOptions = <String>['1', '3', '7', '15'];
+
+  List<_IssueSeverity> get _severityOptions => const [
+        _IssueSeverity.normal,
+        _IssueSeverity.severe,
+      ];
+
+  List<_ResponsibleUnit> get _unitOptions => const [
+        _ResponsibleUnit.projectDept,
+        _ResponsibleUnit.anhuiConstruction,
+      ];
+
+  List<_ResponsibleOwner> get _ownerOptions => const [
+        _ResponsibleOwner.muYi,
+        _ResponsibleOwner.fengConstruction,
+      ];
+
+  String _unitLabel(_ResponsibleUnit v) {
+    switch (v) {
+      case _ResponsibleUnit.projectDept:
+        return _l10n.dailyInspectionUnitProjectDept;
+      case _ResponsibleUnit.anhuiConstruction:
+        return _l10n.dailyInspectionUnitAnhuiConstruction;
+    }
+  }
+
+  String _ownerLabel(_ResponsibleOwner v) {
+    switch (v) {
+      case _ResponsibleOwner.muYi:
+        return _l10n.dailyInspectionOwnerMuYi;
+      case _ResponsibleOwner.fengConstruction:
+        return _l10n.dailyInspectionOwnerFengConstruction;
+    }
+  }
 
   DefectLibraryEntry? _lookupEntryByIdFlexible(
     DefectLibraryService library,
@@ -366,6 +421,14 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+
+    _l10n = context.l10n;
+    final locale = Localizations.localeOf(context);
+    final tag = locale.toLanguageTag();
+    if (_lastLocaleTag != tag) {
+      _lastLocaleTag = tag;
+      unawaited(_ensureDefectLibraryLoaded(locale: locale));
+    }
 
     final extra = GoRouterState.of(context).extra;
     if (extra is Map && extra['spokenIssueText'] is String) {
@@ -493,10 +556,11 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
     super.dispose();
   }
 
-  Future<void> _ensureDefectLibraryLoaded() async {
+  Future<void> _ensureDefectLibraryLoaded({Locale? locale}) async {
     try {
+      final effectiveLocale = locale ?? Localizations.localeOf(context);
       final library = ref.read(defectLibraryServiceProvider);
-      await library.ensureLoaded();
+      await library.ensureLoaded(locale: effectiveLocale);
       if (!mounted) return;
       setState(() {
         _defectOptions = library.entries;
@@ -522,6 +586,24 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
     return '$best';
   }
 
+  String _severityLabel(_IssueSeverity s) {
+    switch (s) {
+      case _IssueSeverity.severe:
+        return _l10n.issueSeveritySevere;
+      case _IssueSeverity.normal:
+        return _l10n.issueSeverityNormal;
+    }
+  }
+
+  String _severityCode(_IssueSeverity s) {
+    switch (s) {
+      case _IssueSeverity.severe:
+        return 'severe';
+      case _IssueSeverity.normal:
+        return 'normal';
+    }
+  }
+
   List<String> _uniqueNonEmpty(Iterable<String> values) {
     final out = <String>[];
     final seen = <String>{};
@@ -540,20 +622,24 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
     _item = e.item;
     _indicator = e.indicator;
 
-    _level = _levelOptions.contains(e.levelNormalized)
-        ? e.levelNormalized
-        : _levelOptions.first;
+    _severity = e.levelNormalized.contains('严重')
+        ? _IssueSeverity.severe
+        : _IssueSeverity.normal;
 
     _deadline = _deadlineOptionFromDays(e.deadlineDays) ?? _deadlineOptions[1];
   }
 
   Future<_AiConfirmAction> _showAiConfirmSheet({
     required Widget body,
-    String confirmLabel = '同意并填充',
-    String cancelLabel = '不同意',
+    String? confirmLabel,
+    String? cancelLabel,
     bool allowVoiceDescribe = true,
-    String voiceDescribeLabel = '我来描述(语音)',
+    String? voiceDescribeLabel,
   }) async {
+    final okLabel = confirmLabel ?? _l10n.commonAgreeAndFill;
+    final noLabel = cancelLabel ?? _l10n.commonDisagree;
+    final voiceLabel = voiceDescribeLabel ?? _l10n.dailyInspectionVoiceDescribe;
+
     final action = await showModalBottomSheet<_AiConfirmAction>(
       context: context,
       isScrollControlled: true,
@@ -572,7 +658,7 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '识别结果（请确认）',
+                  _l10n.commonRecognitionResultConfirmTitle,
                   style: Theme.of(ctx).textTheme.titleMedium,
                 ),
                 const SizedBox(height: 12),
@@ -585,7 +671,7 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
                       child: OutlinedButton(
                         onPressed: () =>
                             Navigator.of(ctx).pop(_AiConfirmAction.cancel),
-                        child: Text(cancelLabel),
+                        child: Text(noLabel),
                       ),
                     ),
                     if (allowVoiceDescribe) ...[
@@ -598,7 +684,7 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
                           child: FittedBox(
                             fit: BoxFit.scaleDown,
                             child: Text(
-                              voiceDescribeLabel,
+                              voiceLabel,
                               maxLines: 1,
                               softWrap: false,
                               overflow: TextOverflow.ellipsis,
@@ -613,7 +699,7 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
                       child: FilledButton(
                         onPressed: () =>
                             Navigator.of(ctx).pop(_AiConfirmAction.accept),
-                        child: Text(confirmLabel),
+                        child: Text(okLabel),
                       ),
                     ),
                   ],
@@ -632,7 +718,7 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
     if (kIsWeb) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Web 端暂不支持语音识别，请用真机。')),
+        SnackBar(content: Text(_l10n.dailyInspectionSnackWebVoiceNotSupported)),
       );
       return;
     }
@@ -650,7 +736,7 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
     });
 
     Future<String?> captureOnce() async {
-      unawaited(tts.speak('请描述你发现的问题。'));
+      unawaited(tts.speak(_l10n.dailyInspectionTtsDescribeIssuePrompt));
 
       final completer = Completer<String?>();
       var gotFinal = false;
@@ -678,7 +764,7 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
 
       if (!mounted) return null;
       if (!ok) {
-        final msg = speech.lastInitError ?? '语音识别启动失败';
+        final msg = speech.lastInitError ?? _l10n.commonSpeechInitFailed;
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text(msg)));
         return null;
@@ -729,7 +815,7 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    '你刚才说的是：',
+                    _l10n.commonYouJustSaid,
                     style: Theme.of(ctx).textTheme.titleMedium,
                   ),
                   const SizedBox(height: 10),
@@ -749,7 +835,7 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
                         child: OutlinedButton(
                           onPressed: () =>
                               Navigator.of(ctx).pop(_VoiceConfirmAction.cancel),
-                          child: const Text('取消'),
+                          child: Text(_l10n.commonCancel),
                         ),
                       ),
                       const SizedBox(width: 12),
@@ -757,7 +843,7 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
                         child: FilledButton.tonal(
                           onPressed: () =>
                               Navigator.of(ctx).pop(_VoiceConfirmAction.retry),
-                          child: const Text('重说'),
+                          child: Text(_l10n.commonRetrySpeak),
                         ),
                       ),
                       const SizedBox(width: 12),
@@ -765,7 +851,7 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
                         child: FilledButton(
                           onPressed: () =>
                               Navigator.of(ctx).pop(_VoiceConfirmAction.accept),
-                          child: const Text('使用并回填'),
+                          child: Text(_l10n.commonUseAndFill),
                         ),
                       ),
                     ],
@@ -787,7 +873,7 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
       final s = (got ?? '').trim();
       if (s.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('未识别到有效语音内容，请重试。')),
+          SnackBar(content: Text(_l10n.commonSnackNoValidVoiceRetry)),
         );
         continue;
       }
@@ -835,14 +921,17 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            inferred.isNotEmpty ? '已根据你的描述回填分类，可继续修改。' : '已填入描述，可手动选择分类。',
+            inferred.isNotEmpty
+                ? _l10n.dailyInspectionSnackPrefilledCategoryMatched
+                : _l10n.dailyInspectionSnackDescriptionFilledManualSelect,
           ),
         ),
       );
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('已填入描述，但本地分类匹配失败，请手动选择。')),
+        SnackBar(
+            content: Text(_l10n.dailyInspectionSnackLocalMatchFailedManual)),
       );
     }
   }
@@ -866,7 +955,8 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
     if (kIsWeb) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Web 端仅用于预览 UI，暂不支持拍照/识别。')),
+        SnackBar(
+            content: Text(_l10n.dailyInspectionSnackWebCameraNotSupported)),
       );
       return;
     }
@@ -875,8 +965,8 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
     if (!mounted) return;
 
     if (path == null || path.trim().isEmpty) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('已取消拍照')));
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(_l10n.dailyInspectionSnackPhotoCanceled)));
       return;
     }
 
@@ -885,12 +975,20 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
     });
 
     if (_spokenIssueText.trim().isNotEmpty) {
-      unawaited(ref.read(ttsServiceProvider).speak('拍照完成，正在根据你说的问题匹配问题库。'));
+      unawaited(
+        ref
+            .read(ttsServiceProvider)
+            .speak(_l10n.dailyInspectionTtsPhotoDoneMatchingLibrary),
+      );
       unawaited(_fillFromSpokenIssueAfterPhoto(path));
       return;
     }
 
-    unawaited(ref.read(ttsServiceProvider).speak('拍照完成，开始识别。'));
+    unawaited(
+      ref
+          .read(ttsServiceProvider)
+          .speak(_l10n.dailyInspectionTtsPhotoDoneStartAnalyze),
+    );
     unawaited(_analyzePhoto(path));
   }
 
@@ -905,7 +1003,7 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
       await library.ensureLoaded();
 
       final issue = _spokenIssueText.trim();
-      final query = ['日常巡检', _location, issue]
+      final query = [_l10n.dailyInspectionPromptTitle, _location, issue]
           .where((s) => s.trim().isNotEmpty)
           .join(' ');
 
@@ -915,7 +1013,7 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
       final merged = <String>[
         if (picked != null && picked.indicator.trim().isNotEmpty)
           picked.indicator.trim(),
-        '说明：$issue',
+        _l10n.commonLineNote(issue),
       ].join('\n');
 
       if (!mounted) return;
@@ -931,14 +1029,18 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            picked != null ? '已根据语音描述匹配并回填，可继续修改。' : '已回填语音描述，可手动选择分类。',
+            picked != null
+                ? _l10n.dailyInspectionSnackPrefilledFromVoiceMatched
+                : _l10n.dailyInspectionSnackPrefilledFromVoiceManualSelect,
           ),
         ),
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('根据语音回填失败：$e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+            content: Text(_l10n.dailyInspectionSnackPrefillFromVoiceFailed(e))),
+      );
     } finally {
       if (mounted) {
         setState(() {
@@ -966,12 +1068,12 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
       final library = ref.read(defectLibraryServiceProvider);
       await library.ensureLoaded();
 
-      const sceneHint = '日常巡检拍照（可能是缺陷照片，也可能是铭牌/送货单）';
-      const hint = '优先从问题库匹配具体指标；若不匹配则给出简短可记录描述。';
+      final sceneHint = _l10n.dailyInspectionSceneHintPhoto;
+      final hint = _l10n.dailyInspectionPhotoHint;
 
       final candidateEntries = library.suggest(
         query:
-            '日常巡检 $sceneHint $hint $_location ${userHintText.isEmpty ? '' : userHintText}',
+            '${_l10n.dailyInspectionPromptTitle} $sceneHint $hint $_location ${userHintText.isEmpty ? '' : userHintText}',
         limit: 30,
       );
       final candidateLines =
@@ -1026,17 +1128,27 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
         final suggestion = result.rectifySuggestion.trim();
 
         final extraLines = <String>[];
-        if (summary.isNotEmpty) extraLines.add('说明：$summary');
-        if (defectType.isNotEmpty) extraLines.add('类型：$defectType');
-        if (severity.isNotEmpty) extraLines.add('严重程度：$severity');
-        if (suggestion.isNotEmpty) extraLines.add('整改：$suggestion');
+        if (summary.isNotEmpty) extraLines.add(_l10n.commonLineNote(summary));
+        if (defectType.isNotEmpty) {
+          extraLines.add(_l10n.dailyInspectionLineDefectType(defectType));
+        }
+        if (severity.isNotEmpty) {
+          extraLines.add(_l10n.dailyInspectionLineSeverity(severity));
+        }
+        if (suggestion.isNotEmpty) {
+          extraLines.add(_l10n.dailyInspectionLineRectify(suggestion));
+        }
 
         final mergedPreview = <String>[
           if (base.isNotEmpty) base,
           ...extraLines,
         ].join('\n');
 
-        unawaited(ref.read(ttsServiceProvider).speak('识别完成，请确认。'));
+        unawaited(
+          ref
+              .read(ttsServiceProvider)
+              .speak(_l10n.dailyInspectionTtsRecognizedPleaseConfirm),
+        );
         final action = await _showAiConfirmSheet(
           body: Column(
             mainAxisSize: MainAxisSize.min,
@@ -1044,24 +1156,35 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
             children: [
               if (p != null) ...[
                 _aiSummaryLine(
-                  '将填充',
+                  _l10n.dailyInspectionAiWillFillLabel,
                   '${p.division} / ${p.subDivision} / ${p.item} / ${p.indicator}',
                 ),
-                _aiSummaryLine('条目ID', p.id),
-                _aiSummaryLine('级别', p.levelNormalized),
-                _aiSummaryLine('整改天数', p.deadlineLabel),
+                _aiSummaryLine(_l10n.dailyInspectionAiLabelEntryId, p.id),
+                _aiSummaryLine(
+                    _l10n.dailyInspectionAiLabelLevel, p.levelNormalized),
+                _aiSummaryLine(
+                  _l10n.dailyInspectionAiLabelDeadlineDays,
+                  p.deadlineLabel,
+                ),
               ] else ...[
-                _aiSummaryLine('分类', '未命中问题库条目（可选择不填充，改为手动选择）'),
+                _aiSummaryLine(
+                  _l10n.dailyInspectionAiLabelCategory,
+                  _l10n.dailyInspectionAiCategoryNotMatchedHint,
+                ),
               ],
-              _aiSummaryLine('类型', result.type),
-              _aiSummaryLine('说明', summary),
-              _aiSummaryLine('缺陷类型', defectType),
-              _aiSummaryLine('严重程度', severity),
-              _aiSummaryLine('整改建议', suggestion.replaceAll('；', '\n- ')),
+              _aiSummaryLine(_l10n.dailyInspectionAiLabelType, result.type),
+              _aiSummaryLine(_l10n.dailyInspectionAiLabelSummary, summary),
+              _aiSummaryLine(
+                  _l10n.dailyInspectionAiLabelDefectType, defectType),
+              _aiSummaryLine(_l10n.dailyInspectionAiLabelSeverity, severity),
+              _aiSummaryLine(
+                _l10n.dailyInspectionAiLabelRectifySuggestion,
+                suggestion.replaceAll('；', '\n- '),
+              ),
               if (mergedPreview.trim().isNotEmpty) ...[
                 const SizedBox(height: 8),
                 Text(
-                  '将填入问题描述：',
+                  _l10n.dailyInspectionAiWillFillDescLabel,
                   style: Theme.of(context).textTheme.labelLarge,
                 ),
                 const SizedBox(height: 6),
@@ -1115,11 +1238,15 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
       });
       final text = result.text.trim();
       if (text.isNotEmpty) {
-        unawaited(ref.read(ttsServiceProvider).speak('识别完成，请确认。'));
+        unawaited(
+          ref
+              .read(ttsServiceProvider)
+              .speak(_l10n.dailyInspectionTtsRecognizedPleaseConfirm),
+        );
         final action = await _showAiConfirmSheet(
           body: Text(text),
-          confirmLabel: '同意并填充',
-          cancelLabel: '不同意',
+          confirmLabel: _l10n.commonAgreeAndFill,
+          cancelLabel: _l10n.commonDisagree,
         );
         if (!mounted) return;
         if (action == _AiConfirmAction.voiceDescribe) {
@@ -1133,8 +1260,9 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
       }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('AI识别失败：$e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(_l10n.dailyInspectionSnackAiAnalyzeFailed(e))),
+      );
     } finally {
       if (mounted) {
         setState(() {
@@ -1147,7 +1275,7 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
   Future<void> _toggleVoiceToText() async {
     if (kIsWeb) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Web 端暂不支持语音识别，请用真机。')),
+        SnackBar(content: Text(_l10n.dailyInspectionSnackWebVoiceNotSupported)),
       );
       return;
     }
@@ -1186,7 +1314,7 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
 
     if (!mounted) return;
     if (!ok) {
-      final msg = speech.lastInitError ?? '语音识别启动失败';
+      final msg = speech.lastInitError ?? _l10n.commonSpeechInitFailed;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
       return;
     }
@@ -1198,7 +1326,7 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
 
   void _save() {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('已暂存到本地（模拟）')),
+      SnackBar(content: Text(_l10n.commonSnackSavedLocallyMock)),
     );
   }
 
@@ -1218,13 +1346,14 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
     final desc = _descController.text.trim();
     if (_item.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请先选择分部分项/指标（或用语音匹配）')),
+        SnackBar(content: Text(_l10n.dailyInspectionSnackSelectCategoryFirst)),
       );
       return;
     }
     if (desc.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请填写问题描述')),
+        SnackBar(
+            content: Text(_l10n.dailyInspectionSnackPleaseFillDescription)),
       );
       return;
     }
@@ -1246,10 +1375,10 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
         item: _item,
         indicator: _indicator,
         description: desc,
-        severity: _level,
+        severity: _severityCode(_severity),
         deadlineDays: deadlineDays,
-        responsibleUnit: _unit,
-        responsiblePerson: _owner,
+        responsibleUnit: _unitLabel(_unit),
+        responsiblePerson: _ownerLabel(_owner),
         libraryId: _selectedLibraryId,
         photoPath: _photoPath,
         clientRecordId: _clientIssueId!,
@@ -1265,7 +1394,7 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
     if (!mounted) return;
     if (id == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('提交失败：后端不可用或网络异常')),
+        SnackBar(content: Text(_l10n.commonSubmitFailedBackendUnavailable)),
       );
       return;
     }
@@ -1274,9 +1403,9 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
     _resetAfterSubmit();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('已提交到后端（id=$id）'),
+        content: Text(_l10n.commonSubmittedToBackend(id)),
         action: SnackBarAction(
-          label: '返回首页',
+          label: _l10n.commonBackHome,
           onPressed: () {
             if (!mounted) return;
             context.goNamed(HomeScreen.routeName);
@@ -1311,7 +1440,7 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
         labelText: label,
         border: const OutlineInputBorder(),
       ),
-      hint: const Text('请选择'),
+      hint: Text(_l10n.commonPleaseSelect),
       items: [
         for (final o in options)
           DropdownMenuItem<String>(
@@ -1399,7 +1528,7 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
           icon: const Icon(Icons.arrow_back),
           onPressed: () => context.goNamed(HomeScreen.routeName),
         ),
-        title: const Text('记录问题'),
+        title: Text(_l10n.dailyInspectionTitle),
         actions: [
           IconButton(
             onPressed: () {
@@ -1409,12 +1538,12 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
               );
             },
             icon: const Icon(Icons.table_rows),
-            tooltip: '查看记录表',
+            tooltip: _l10n.commonViewRecords,
           ),
           IconButton(
             onPressed: () => context.goNamed(HomeScreen.routeName),
             icon: const Icon(Icons.close),
-            tooltip: '关闭',
+            tooltip: _l10n.commonClose,
           ),
         ],
       ),
@@ -1424,7 +1553,7 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
               onTap: () {
                 if (_sessionProcessing) return;
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('请长按麦克风开始说话，松开结束')),
+                  SnackBar(content: Text(_l10n.commonSnackLongPressMicHint)),
                 );
               },
               onLongPressStart: (_) async {
@@ -1489,14 +1618,14 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
                         Expanded(
                           child: Text(
                             _backendReachable!
-                                ? '后端已连接（可提交到数据库）'
-                                : '后端未连接（当前只能暂存/提交会失败）',
+                                ? _l10n.dailyInspectionBackendConnected
+                                : _l10n.dailyInspectionBackendDisconnected,
                             style: Theme.of(context).textTheme.bodySmall,
                           ),
                         ),
                         TextButton(
                           onPressed: _probeBackend,
-                          child: const Text('重试'),
+                          child: Text(_l10n.commonRetry),
                         ),
                       ],
                     ),
@@ -1517,9 +1646,10 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
                           const SizedBox(width: 12),
                           Expanded(
                             child: _DropdownTile(
-                              label: '部位',
+                              label: _l10n.commonPart,
                               value: _location,
                               options: _locationOptions,
+                              optionLabel: (v) => v,
                               onChanged: _onLocationChangedByUser,
                             ),
                           ),
@@ -1530,7 +1660,7 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
                         children: [
                           Expanded(
                             child: _buildCascadingDropdown(
-                              label: '分部',
+                              label: _l10n.commonDivision,
                               value: safeDivision,
                               options: divisionOptions,
                               onChanged: (v) {
@@ -1546,7 +1676,7 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
                           const SizedBox(width: 12),
                           Expanded(
                             child: _buildCascadingDropdown(
-                              label: '子分部',
+                              label: _l10n.commonSubdivision,
                               value: safeSubDivision,
                               options: subDivisionOptions,
                               onChanged: (v) {
@@ -1565,7 +1695,7 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
                         children: [
                           Expanded(
                             child: _buildCascadingDropdown(
-                              label: '分项',
+                              label: _l10n.commonItem,
                               value: safeItem,
                               options: itemOptions,
                               onChanged: (v) {
@@ -1579,7 +1709,7 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
                           const SizedBox(width: 12),
                           Expanded(
                             child: _buildCascadingDropdown(
-                              label: '指标',
+                              label: _l10n.commonIndicator,
                               value: safeIndicator,
                               options: indicatorOptions,
                               onChanged: (v) {
@@ -1594,23 +1724,23 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
                       Row(
                         children: [
                           Expanded(
-                            child: _LevelToggleTile(
-                              label: '问题级别',
-                              value: _levelOptions.contains(_level)
-                                  ? _level
-                                  : _levelOptions.first,
-                              options: _levelOptions,
-                              onChanged: (v) => setState(() => _level = v),
+                            child: _LevelToggleTile<_IssueSeverity>(
+                              label: _l10n.dailyInspectionLabelSeverity,
+                              value: _severity,
+                              options: _severityOptions,
+                              optionLabel: _severityLabel,
+                              onChanged: (v) => setState(() => _severity = v),
                             ),
                           ),
                           const SizedBox(width: 12),
                           Expanded(
                             child: _DropdownTile(
-                              label: '整改时限',
+                              label: _l10n.dailyInspectionLabelDeadlineDays,
                               value: _deadlineOptions.contains(_deadline)
                                   ? _deadline
                                   : _deadlineOptions[1],
                               options: _deadlineOptions,
+                              optionLabel: (v) => v,
                               onChanged: (v) => setState(() => _deadline = v),
                             ),
                           ),
@@ -1621,18 +1751,20 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
                         children: [
                           Expanded(
                             child: _DropdownTile(
-                              label: '责任单位',
+                              label: _l10n.dailyInspectionLabelUnit,
                               value: _unit,
                               options: _unitOptions,
+                              optionLabel: _unitLabel,
                               onChanged: (v) => setState(() => _unit = v),
                             ),
                           ),
                           const SizedBox(width: 12),
                           Expanded(
                             child: _DropdownTile(
-                              label: '责任人',
+                              label: _l10n.dailyInspectionLabelOwner,
                               value: _owner,
                               options: _ownerOptions,
+                              optionLabel: _ownerLabel,
                               onChanged: (v) => setState(() => _owner = v),
                             ),
                           ),
@@ -1660,8 +1792,8 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
                                   ),
                                 ),
                                 const SizedBox(width: 10),
-                                const Expanded(
-                                  child: Text('正在聆听…（实时识别中）'),
+                                Expanded(
+                                  child: Text(_l10n.dailyInspectionListening),
                                 ),
                                 TextButton(
                                   onPressed: () async {
@@ -1677,7 +1809,7 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
                                       _listening = false;
                                     });
                                   },
-                                  child: const Text('点击停止'),
+                                  child: Text(_l10n.dailyInspectionTapStop),
                                 ),
                               ],
                             ),
@@ -1688,15 +1820,19 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
                       OutlinedButton.icon(
                         onPressed: _aiAnalyzing ? null : _toggleVoiceToText,
                         icon: Icon(_listening ? Icons.stop : Icons.mic),
-                        label: Text(_listening ? '停止' : '语音转文字'),
+                        label: Text(
+                          _listening
+                              ? _l10n.dailyInspectionVoiceToTextStop
+                              : _l10n.dailyInspectionVoiceToTextStart,
+                        ),
                       ),
                       const SizedBox(height: 12),
                       TextField(
                         controller: _descController,
                         minLines: 2,
                         maxLines: 2,
-                        decoration: const InputDecoration(
-                          labelText: '问题描述',
+                        decoration: InputDecoration(
+                          labelText: _l10n.dailyInspectionDescriptionLabel,
                           border: OutlineInputBorder(),
                         ),
                       ),
@@ -1712,7 +1848,7 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
                         Expanded(
                           child: OutlinedButton(
                             onPressed: _save,
-                            child: const Text('暂存'),
+                            child: Text(_l10n.commonSaveDraft),
                           ),
                         ),
                         const SizedBox(width: 12),
@@ -1721,7 +1857,7 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
                             onPressed: (_aiAnalyzing || _submitting)
                                 ? null
                                 : _submitToBackend,
-                            child: const Text('保存'),
+                            child: Text(_l10n.commonSave),
                           ),
                         ),
                       ],
@@ -1745,10 +1881,10 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       if (_sessionPartial.isNotEmpty)
-                        Text('实时识别：$_sessionPartial'),
+                        Text(_l10n.commonRealtimeRecognition(_sessionPartial)),
                       if (_sessionLast.isNotEmpty)
                         Text(
-                          '上次识别：$_sessionLast',
+                          _l10n.commonLastRecognition(_sessionLast),
                           style: Theme.of(context).textTheme.bodySmall,
                         ),
                     ],
@@ -1772,19 +1908,20 @@ class _AnalyzingIndicator extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     return Card(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
         child: Row(
           mainAxisSize: MainAxisSize.min,
-          children: const [
-            SizedBox(
+          children: [
+            const SizedBox(
               width: 20,
               height: 20,
               child: CircularProgressIndicator(strokeWidth: 2.5),
             ),
-            SizedBox(width: 12),
-            Text('AI分析中…'),
+            const SizedBox(width: 12),
+            Text(l10n.commonAiAnalyzing),
           ],
         ),
       ),
@@ -1792,16 +1929,18 @@ class _AnalyzingIndicator extends StatelessWidget {
   }
 }
 
-class _DropdownTile extends StatelessWidget {
+class _DropdownTile<T> extends StatelessWidget {
   final String label;
-  final String value;
-  final List<String> options;
-  final ValueChanged<String> onChanged;
+  final T value;
+  final List<T> options;
+  final String Function(T) optionLabel;
+  final ValueChanged<T> onChanged;
 
   const _DropdownTile({
     required this.label,
     required this.value,
     required this.options,
+    required this.optionLabel,
     required this.onChanged,
   });
 
@@ -1811,7 +1950,7 @@ class _DropdownTile extends StatelessWidget {
         ? value
         : (options.isEmpty ? null : options.first);
 
-    return DropdownButtonFormField<String>(
+    return DropdownButtonFormField<T>(
       isExpanded: true,
       value: safeValue,
       decoration: InputDecoration(
@@ -1820,10 +1959,10 @@ class _DropdownTile extends StatelessWidget {
       ),
       items: [
         for (final o in options)
-          DropdownMenuItem<String>(
+          DropdownMenuItem<T>(
             value: o,
             child: Text(
-              o,
+              optionLabel(o),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               softWrap: false,
@@ -1838,16 +1977,18 @@ class _DropdownTile extends StatelessWidget {
   }
 }
 
-class _LevelToggleTile extends StatelessWidget {
+class _LevelToggleTile<T> extends StatelessWidget {
   final String label;
-  final String value;
-  final List<String> options;
-  final ValueChanged<String> onChanged;
+  final T value;
+  final List<T> options;
+  final String Function(T) optionLabel;
+  final ValueChanged<T> onChanged;
 
   const _LevelToggleTile({
     required this.label,
     required this.value,
     required this.options,
+    required this.optionLabel,
     required this.onChanged,
   });
 
@@ -1864,7 +2005,7 @@ class _LevelToggleTile extends StatelessWidget {
         children: [
           for (final o in options)
             ChoiceChip(
-              label: Text(o),
+              label: Text(optionLabel(o)),
               selected: o == value,
               onSelected: (_) => onChanged(o),
             ),
@@ -1887,10 +2028,13 @@ class _PhotoBox extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    final cs = Theme.of(context).colorScheme;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('现场照片', style: Theme.of(context).textTheme.labelLarge),
+        Text(l10n.dailyInspectionOnsitePhoto,
+            style: Theme.of(context).textTheme.labelLarge),
         const SizedBox(height: 6),
         AspectRatio(
           aspectRatio: 1.4,
@@ -1928,6 +2072,16 @@ class _PhotoBox extends StatelessWidget {
               ],
             ),
           ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          photoPath == null
+              ? l10n.dailyInspectionPhotoTapHint
+              : l10n.dailyInspectionPhotoHasPhotoHint,
+          style: Theme.of(context)
+              .textTheme
+              .bodySmall
+              ?.copyWith(color: cs.outline),
         ),
       ],
     );

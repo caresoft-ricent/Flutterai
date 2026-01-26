@@ -1,9 +1,11 @@
 import 'dart:convert';
 import 'dart:math' as math;
 
-import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../utils/localized_assets.dart';
 
 final defectLibraryServiceProvider = Provider<DefectLibraryService>((ref) {
   return DefectLibraryService();
@@ -89,11 +91,23 @@ class DefectLibraryService {
   Map<String, DefectLibraryEntry>? _byId;
   Future<void>? _loading;
 
+  Locale? _loadedLocale;
+
   _Bm25Index? _bm25;
 
-  Future<void> ensureLoaded() {
-    if (_entries != null) return Future.value();
-    return _loading ??= _load();
+  Future<void> ensureLoaded({Locale? locale}) {
+    final effectiveLocale = locale ?? _loadedLocale;
+    final loading = _loading;
+    if (_entries != null && _loadedLocale == effectiveLocale) {
+      return Future.value();
+    }
+    if (loading != null && _loadedLocale == effectiveLocale) {
+      return loading;
+    }
+    _loadedLocale = effectiveLocale;
+    final future = _load(locale: effectiveLocale);
+    _loading = future;
+    return future;
   }
 
   List<DefectLibraryEntry> get entries {
@@ -475,9 +489,17 @@ class DefectLibraryService {
     }
   }
 
-  Future<void> _load() async {
-    final quality = await _loadOne(_qualityAsset, DefectSource.quality);
-    final safety = await _loadOne(_safetyAsset, DefectSource.safety);
+  Future<void> _load({Locale? locale}) async {
+    final quality = await _loadOne(
+      _qualityAsset,
+      DefectSource.quality,
+      locale: locale,
+    );
+    final safety = await _loadOne(
+      _safetyAsset,
+      DefectSource.safety,
+      locale: locale,
+    );
 
     final all = <DefectLibraryEntry>[...quality, ...safety];
     _entries = all;
@@ -495,10 +517,11 @@ class DefectLibraryService {
   }
 
   Future<List<DefectLibraryEntry>> _loadOne(
-    String assetPath,
-    DefectSource source,
-  ) async {
-    final raw = await rootBundle.loadString(assetPath);
+      String assetPath, DefectSource source,
+      {Locale? locale}) async {
+    final raw = (locale == null)
+        ? await rootBundle.loadString(assetPath)
+        : await loadStringLocalized(assetPath, locale: locale);
     final decoded = jsonDecode(raw);
     if (decoded is! Map) return const [];
 

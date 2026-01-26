@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../l10n/context_l10n.dart';
 import '../services/backend_api_service.dart';
 
 class BackendSettingsScreen extends ConsumerStatefulWidget {
@@ -64,7 +65,7 @@ class _BackendSettingsScreenState extends ConsumerState<BackendSettingsScreen> {
       await _checkHealth();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('后端地址已保存')),
+        SnackBar(content: Text(context.l10n.backendSaved)),
       );
     } finally {
       if (mounted) {
@@ -83,7 +84,7 @@ class _BackendSettingsScreenState extends ConsumerState<BackendSettingsScreen> {
       _reachable = null;
     });
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('已恢复默认后端地址')),
+      SnackBar(content: Text(context.l10n.backendResetDone)),
     );
   }
 
@@ -98,12 +99,16 @@ class _BackendSettingsScreenState extends ConsumerState<BackendSettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final statusText =
-        _reachable == null ? '未检测' : (_reachable! ? '已连接' : '未连接');
+    final l10n = context.l10n;
+    final statusText = _reachable == null
+        ? l10n.backendStatusUnknown
+        : (_reachable!
+            ? l10n.backendStatusConnected
+            : l10n.backendStatusDisconnected);
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('后端设置'),
+        title: Text(l10n.backendSettingsTitle),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: () => context.pop(),
@@ -111,7 +116,7 @@ class _BackendSettingsScreenState extends ConsumerState<BackendSettingsScreen> {
         actions: [
           TextButton(
             onPressed: _saving ? null : _reset,
-            child: const Text('恢复默认'),
+            child: Text(l10n.backendReset),
           ),
         ],
       ),
@@ -124,16 +129,16 @@ class _BackendSettingsScreenState extends ConsumerState<BackendSettingsScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      '当前生效：${_effectiveBaseUrl ?? ''}',
+                      l10n.backendCurrentEffective(_effectiveBaseUrl ?? ''),
                       style: Theme.of(context).textTheme.bodyMedium,
                     ),
                     const SizedBox(height: 12),
                     TextField(
                       controller: _controller,
-                      decoration: const InputDecoration(
-                        labelText: '后端 API Base URL（可留空使用默认）',
-                        hintText: 'http://192.168.1.10:8000',
-                        border: OutlineInputBorder(),
+                      decoration: InputDecoration(
+                        labelText: l10n.backendBaseUrlLabel,
+                        hintText: l10n.backendBaseUrlHint,
+                        border: const OutlineInputBorder(),
                       ),
                       keyboardType: TextInputType.url,
                       textInputAction: TextInputAction.done,
@@ -145,22 +150,24 @@ class _BackendSettingsScreenState extends ConsumerState<BackendSettingsScreen> {
                         Expanded(
                           child: FilledButton(
                             onPressed: _saving ? null : _save,
-                            child: Text(_saving ? '保存中…' : '保存'),
+                            child: Text(_saving
+                                ? l10n.backendSaving
+                                : l10n.backendSave),
                           ),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
                           child: OutlinedButton(
                             onPressed: _saving ? null : _checkHealth,
-                            child: Text('连通性检测：$statusText'),
+                            child: Text(
+                              l10n.backendConnectivityCheck(statusText),
+                            ),
                           ),
                         ),
                       ],
                     ),
                     const SizedBox(height: 12),
-                    const Text(
-                      '提示：真机联调时通常需要填写 Mac 的局域网 IP，例如 http://192.168.x.x:8000',
-                    ),
+                    Text(l10n.backendTipLan),
                   ],
                 ),
               ),
