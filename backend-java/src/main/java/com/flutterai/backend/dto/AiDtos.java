@@ -9,7 +9,8 @@ public final class AiDtos {
   public record ChatIn(
       String query,
       String projectName,
-      List<Map<String, Object>> messages
+      List<Map<String, Object>> messages,
+      Boolean aiEnabled
   ) {}
 
   public record ChatOut(

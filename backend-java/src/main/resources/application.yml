@@ -5,9 +5,10 @@ spring:
   jackson:
     property-naming-strategy: SNAKE_CASE
   datasource:
-    # Share the same SQLite DB file with the Python backend (backend/flutterai.db)
-    # Override via SPRING_DATASOURCE_URL if needed.
-    url: jdbc:sqlite:../flutterai.db
+    # NOTE: Java backend uses ONE shared DB at repo root: flutterai.db
+    # To force a specific DB path, set env APP_DB_PATH or config app.db.path.
+    # This value is kept mainly for documentation and can be overridden by SPRING_DATASOURCE_URL.
+    url: jdbc:sqlite:./flutterai.db?busy_timeout=10000
     driver-class-name: org.sqlite.JDBC
   jpa:
     hibernate:
@@ -19,8 +20,14 @@ spring:
     open-in-view: false
 
 app:
-  # Share uploads with the Python backend (backend/uploads)
-  uploads-dir: ../backend/uploads
+  # Share uploads with the Python backend. Resolved with backend/ and ../backend/ fallbacks.
+  uploads-dir: backend/uploads
+  # Optional override: absolute/relative DB path. If empty, backend/... and ../backend/... will be auto-detected.
+  # db:
+  #   path: flutterai.db
   ai:
-    # Match Python's config location (backend/config.json)
-    local-config-path: ../backend/config.json
+    # Feature flag: when true, /v1/ai/chat will try calling Doubao (Ark) and fall back to rules on errors.
+    # Can be overridden by env: APP_AI_ENABLED=true
+    enabled: false
+    # Match Python's config location. Resolved with backend/ and ../backend/ fallbacks.
+    local-config-path: backend/config.json

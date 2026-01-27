@@ -27,6 +27,11 @@
   "backendStatusDisconnected": "未连接",
   "backendTipLan": "提示：真机联调时通常需要填写 Mac 的局域网 IP，例如 http://192.168.x.x:8000",
 
+  "backendAiEnabledTitle": "启用大模型（AI 问答）",
+  "backendAiEnabledSubtitle": "开=尝试调用豆包并润色回答；关=只返回规则答案（用于演示对比）",
+  "backendAiEnabledOn": "大模型已开启（本机）",
+  "backendAiEnabledOff": "大模型已关闭（本机）",
+
   "navRecords": "记录表",
   "navBackendSettings": "后端设置",
   "navSettings": "设置",

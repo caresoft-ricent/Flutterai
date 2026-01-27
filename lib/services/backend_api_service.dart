@@ -22,6 +22,7 @@ class BackendApiService {
   late final Dio _dio;
 
   static const _prefsKeyBaseUrl = 'backend_base_url';
+  static const _prefsKeyAiEnabled = 'ai_enabled';
 
   BackendApiService(this._ref) {
     _dio = Dio(
@@ -80,6 +81,20 @@ class BackendApiService {
     } else {
       await prefs.setString(_prefsKeyBaseUrl, _normalizeBaseUrl(v));
     }
+  }
+
+  static Future<bool> getAiEnabled() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getBool(_prefsKeyAiEnabled) ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<void> setAiEnabled(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_prefsKeyAiEnabled, value);
   }
 
   static Future<String> getEffectiveBaseUrl() async {
@@ -574,11 +589,14 @@ class BackendApiService {
     List<Map<String, String>>? messages,
   }) async {
     await _refreshRuntimeOptions();
+
+    final aiEnabled = await getAiEnabled();
     final resp = await _dio.post(
       '/v1/ai/chat',
       data: {
         'query': query,
         'project_name': _projectName(),
+        'ai_enabled': aiEnabled,
         if (messages != null) 'messages': messages,
       },
     );

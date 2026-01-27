@@ -3,6 +3,7 @@ package com.flutterai.backend.api;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -14,6 +15,8 @@ import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
+
+import com.flutterai.backend.util.SharedBackendPaths;
 
 @RestController
 public class UploadController {
@@ -44,7 +47,13 @@ public class UploadController {
     }
 
     String name = UUID.randomUUID().toString().replace("-", "") + ext;
-    Path dir = Path.of(uploadsDir).toAbsolutePath().normalize();
+    Path dir = SharedBackendPaths.resolveExistingDir(
+        uploadsDir,
+        List.of("backend/uploads", "../backend/uploads")
+    );
+    if (dir == null) {
+      dir = Path.of("backend/uploads").toAbsolutePath().normalize();
+    }
     Files.createDirectories(dir);
 
     Path dst = dir.resolve(name);

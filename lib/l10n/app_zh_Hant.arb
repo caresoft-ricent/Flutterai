@@ -27,6 +27,11 @@
   "backendStatusDisconnected": "未連線",
   "backendTipLan": "提示：真機聯調時通常需要填寫 Mac 的區域網 IP，例如 http://192.168.x.x:8000",
 
+  "backendAiEnabledTitle": "啟用大模型（AI 問答）",
+  "backendAiEnabledSubtitle": "開=嘗試呼叫豆包並潤色回答；關=只回傳規則答案（用於演示對比）",
+  "backendAiEnabledOn": "大模型已開啟（本機）",
+  "backendAiEnabledOff": "大模型已關閉（本機）",
+
   "navRecords": "記錄表",
   "navBackendSettings": "後端設定",
   "navSettings": "設定",

@@ -26,6 +26,10 @@
   "backendStatusConnected": "متصل",
   "backendStatusDisconnected": "غير متصل",
   "backendTipLan": "ملاحظة: عند الاختبار على الجهاز الحقيقي، استخدم عنوان IP المحلي للـ Mac، مثل http://192.168.x.x:8000",
+  "backendAiEnabledTitle": "تفعيل نموذج اللغة (دردشة AI)",
+  "backendAiEnabledSubtitle": "تشغيل = محاولة Doubao وإعادة الصياغة؛ إيقاف = قواعد فقط (للعرض)",
+  "backendAiEnabledOn": "تم تفعيل النموذج (الجهاز)",
+  "backendAiEnabledOff": "تم تعطيل النموذج (الجهاز)",
 
   "navRecords": "السجلات",
   "navBackendSettings": "الخادم",

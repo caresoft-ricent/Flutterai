@@ -1,0 +1,50 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Run Java backend (8000)",
+			"type": "shell",
+			"command": "java",
+			"args": [
+				"-jar",
+				"backend-java/target/backend-0.1.0.jar",
+				"--server.port=8000"
+			],
+			"isBackground": true,
+			"problemMatcher": []
+		},
+		{
+			"label": "Show db files",
+			"type": "shell",
+			"command": "bash",
+			"args": [
+				"-lc",
+				"ls -la flutterai.db backend/flutterai.db backend-java/flutterai.db 2>/dev/null || true"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Build backend-java",
+			"type": "shell",
+			"command": "bash",
+			"args": [
+				"-lc",
+				"cd backend-java && ./mvnw -q -DskipTests package"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Start Java backend 8000",
+			"type": "shell",
+			"command": "bash",
+			"args": [
+				"-lc",
+				"java -jar backend-java/target/backend-0.1.0.jar --server.port=8000"
+			],
+			"isBackground": true,
+			"problemMatcher": []
+		}
+	]
+}
