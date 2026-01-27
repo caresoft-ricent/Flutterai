@@ -1,0 +1,26 @@
+server:
+  port: 8000
+
+spring:
+  jackson:
+    property-naming-strategy: SNAKE_CASE
+  datasource:
+    # Share the same SQLite DB file with the Python backend (backend/flutterai.db)
+    # Override via SPRING_DATASOURCE_URL if needed.
+    url: jdbc:sqlite:../flutterai.db
+    driver-class-name: org.sqlite.JDBC
+  jpa:
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        dialect: org.hibernate.community.dialect.SQLiteDialect
+        format_sql: false
+    open-in-view: false
+
+app:
+  # Share uploads with the Python backend (backend/uploads)
+  uploads-dir: ../backend/uploads
+  ai:
+    # Match Python's config location (backend/config.json)
+    local-config-path: ../backend/config.json
