@@ -20,11 +20,17 @@ public class ChatService {
   private final EntityManager entityManager;
   private final ProjectService projectService;
   private final DashboardService dashboardService;
+  private final DoubaoChatClient doubaoChatClient;
 
-  public ChatService(EntityManager entityManager, ProjectService projectService, DashboardService dashboardService) {
+  public ChatService(
+      EntityManager entityManager,
+      ProjectService projectService,
+      DashboardService dashboardService,
+      DoubaoChatClient doubaoChatClient) {
     this.entityManager = entityManager;
     this.projectService = projectService;
     this.dashboardService = dashboardService;
+    this.doubaoChatClient = doubaoChatClient;
   }
 
   @Transactional
@@ -34,6 +40,8 @@ public class ChatService {
       // Python accepts message fallback; keep simple here.
       throw new IllegalArgumentException("query is empty");
     }
+
+    Boolean aiEnabledOverride = payload == null ? null : payload.aiEnabled();
 
     long projectId = projectService.ensureProject(
         payload != null && payload.projectName() != null && !payload.projectName().trim().isEmpty()
@@ -98,7 +106,10 @@ public class ChatService {
           "tool", Map.of("intent", "progress", "scope", scope),
           "llm", Map.of("used", false, "provider", "doubao", "model", ""));
 
-      return new ChatOut(String.join("\n", lines), Map.of("progress", progress), meta);
+        return maybeRewriteWithLlm(
+          new ChatOut(String.join("\n", lines), Map.of("progress", progress), meta),
+          q,
+          aiEnabledOverride);
     }
 
     if ("issues_top".equals(intent) || "issues_detail".equals(intent)) {
@@ -161,7 +172,10 @@ public class ChatService {
           "tool", Map.of("intent", intent, "scope", scope),
           "llm", Map.of("used", false, "provider", "doubao", "model", ""));
 
-      return new ChatOut(String.join("\n", lines), Map.of("issue_categories", cats), meta);
+        return maybeRewriteWithLlm(
+          new ChatOut(String.join("\n", lines), Map.of("issue_categories", cats), meta),
+          q,
+          aiEnabledOverride);
     }
 
     // Focus keyword route (deterministic pack).
@@ -171,7 +185,8 @@ public class ChatService {
         days = 14;
       }
 
-      Map<String, Object> focusPack = dashboardService.focusPack(projectId, days, building, true, 200);
+        Map<String, Object> focusPack = new HashMap<>(
+          dashboardService.focusPack(projectId, days, building, true, 200));
       // Attach plan-like info
       @SuppressWarnings("unchecked")
       Map<String, Object> meta = (Map<String, Object>) focusPack.getOrDefault("meta", new HashMap<>());
@@ -183,18 +198,61 @@ public class ChatService {
       Map<String, Object> outMeta = Map.of(
           "route", "focus",
           "llm", Map.of("used", false, "provider", "doubao", "model", ""));
-      return new ChatOut(answer, Map.of("focus_pack", focusPack), outMeta);
+        return maybeRewriteWithLlm(
+          new ChatOut(answer, Map.of("focus_pack", focusPack), outMeta),
+          q,
+          aiEnabledOverride);
     }
 
     // Fallback: scoped facts (like _facts_for_plan) + rule-based answer.
-    Map<String, Object> facts = factsForScope(projectId, scope, 10);
+    Map<String, Object> facts = new HashMap<>(factsForScope(projectId, scope, 10));
     facts.put("plan", Map.of("intent", "fallback", "scope", scope, "style", "analysis"));
 
     String answer = fallbackAnswer(q, facts);
     Map<String, Object> meta = Map.of(
         "route", "chat",
         "llm", Map.of("used", false, "provider", "doubao", "model", ""));
-    return new ChatOut(answer, facts, meta);
+    return maybeRewriteWithLlm(new ChatOut(answer, facts, meta), q, aiEnabledOverride);
+  }
+
+  private ChatOut maybeRewriteWithLlm(ChatOut base, String query, Boolean aiEnabledOverride) {
+    if (doubaoChatClient == null) {
+      return base;
+    }
+
+    var r = doubaoChatClient.tryRewrite(aiEnabledOverride, query, base.answer(), base.facts());
+
+    Map<String, Object> meta = new HashMap<>();
+    if (base.meta() != null) {
+      meta.putAll(base.meta());
+    }
+    Map<String, Object> llmMeta = new HashMap<>();
+    if (r != null) {
+      llmMeta.put("provider", r.provider());
+      llmMeta.put("enabled", r.enabled());
+      llmMeta.put("configured", r.configured());
+      llmMeta.put("attempted", r.attempted());
+      llmMeta.put("used", r.used());
+      llmMeta.put("model", r.model());
+      llmMeta.put("base_url", r.baseUrl());
+      if (r.error() != null && !r.error().isBlank()) {
+        llmMeta.put("error", r.error());
+      }
+    } else {
+      llmMeta.put("provider", "doubao");
+      llmMeta.put("enabled", false);
+      llmMeta.put("configured", false);
+      llmMeta.put("attempted", false);
+      llmMeta.put("used", false);
+      llmMeta.put("model", "");
+      llmMeta.put("base_url", "");
+    }
+    meta.put("llm", llmMeta);
+
+    if (r != null && r.used() && r.answer() != null && !r.answer().isBlank()) {
+      return new ChatOut(r.answer(), base.facts(), meta);
+    }
+    return new ChatOut(base.answer(), base.facts(), meta);
   }
 
   private String fallbackAnswer(String q, Map<String, Object> facts) {

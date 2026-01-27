@@ -30,6 +30,8 @@ class _AiChatScreenState extends ConsumerState<AiChatScreen> {
   String _voicePartial = '';
   String _voicePendingFinalText = '';
 
+  bool _aiEnabled = false;
+
   String? _sessionId;
   bool _sessionLoading = true;
 
@@ -45,7 +47,34 @@ class _AiChatScreenState extends ConsumerState<AiChatScreen> {
     super.initState();
     _speech = ref.read(speechServiceProvider);
     _tts = ref.read(ttsServiceProvider);
+    _loadAiEnabled();
     _initSession();
+  }
+
+  Future<void> _loadAiEnabled() async {
+    final v = await BackendApiService.getAiEnabled();
+    if (!mounted) return;
+    setState(() {
+      _aiEnabled = v;
+    });
+  }
+
+  Future<void> _toggleAiEnabled() async {
+    final next = !_aiEnabled;
+    setState(() {
+      _aiEnabled = next;
+    });
+    await BackendApiService.setAiEnabled(next);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          next
+              ? context.l10n.backendAiEnabledOn
+              : context.l10n.backendAiEnabledOff,
+        ),
+      ),
+    );
   }
 
   @override
@@ -490,6 +519,11 @@ class _AiChatScreenState extends ConsumerState<AiChatScreen> {
           tooltip: l10n.commonBack,
         ),
         actions: [
+          IconButton(
+            onPressed: _toggleAiEnabled,
+            icon: Icon(_aiEnabled ? Icons.smart_toy : Icons.smart_toy_outlined),
+            tooltip: l10n.backendAiEnabledTitle,
+          ),
           IconButton(
             onPressed: _sessionLoading ? null : _showSessionSheet,
             icon: const Icon(Icons.history),

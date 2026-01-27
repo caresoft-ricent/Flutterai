@@ -1,0 +1,17 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Build backend-java",
+			"type": "shell",
+			"command": "./mvnw",
+			"args": [
+				"-q",
+				"-DskipTests",
+				"package"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		}
+	]
+}

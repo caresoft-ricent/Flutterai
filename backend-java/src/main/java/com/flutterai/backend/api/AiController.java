@@ -27,31 +27,25 @@ public class AiController {
 
   @GetMapping("/v1/ai/status")
   public Map<String, Object> status() {
-    String apiKey = firstNonNull(
-        aiConfig.getEnv("ARK_API_KEY", "DOUBAO_API_KEY"),
-        aiConfig.getCfg("doubao.api_key")
-    );
-    String model = firstNonNull(
-        aiConfig.getEnv("ARK_MODEL", "DOUBAO_MODEL", "DOUBAO_ENDPOINT_ID"),
-        aiConfig.getCfg("doubao.model"),
-        aiConfig.getCfg("doubao.endpoint_id")
-    );
-    String baseUrl = firstNonNull(
-        aiConfig.getEnv("ARK_BASE_URL", "DOUBAO_BASE_URL"),
-        aiConfig.getCfg("doubao.base_url")
-    );
+    String apiKey = aiConfig.doubaoApiKey();
+    String model = aiConfig.doubaoModel();
+    String baseUrl = aiConfig.doubaoBaseUrl();
+    boolean enabled = aiConfig.isAiEnabled();
 
     return Map.of(
       "llm",
       Map.of(
         "provider", "doubao",
+        "enabled", enabled,
         "configured", apiKey != null && model != null,
         "has_api_key", apiKey != null,
         "has_model", model != null,
-        "has_client", false,
+        "has_client", true,
         "model", model == null ? "" : model,
         "base_url", baseUrl == null ? "" : baseUrl,
-        "note", "Java 参考实现暂不直连豆包；configured 仅表示检测到配置。实际调用请在此处接入 SDK。"
+        "note", enabled
+            ? "已启用 app.ai.enabled=true；会尝试调用豆包 Ark /chat/completions，失败自动回退规则答案。"
+            : "当前未启用（app.ai.enabled=false）；/v1/ai/chat 仅返回规则/意图路由答案。"
       )
     );
   }
@@ -68,15 +62,5 @@ public class AiController {
     return chatService.chat(payload);
   }
 
-  private static String firstNonNull(String... values) {
-    if (values == null) {
-      return null;
-    }
-    for (String v : values) {
-      if (v != null) {
-        return v;
-      }
-    }
-    return null;
-  }
+  // firstNonNull moved to AiConfigService
 }

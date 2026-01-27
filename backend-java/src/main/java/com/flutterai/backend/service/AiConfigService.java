@@ -3,6 +3,7 @@ package com.flutterai.backend.service;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -10,10 +11,14 @@ import org.springframework.stereotype.Service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.flutterai.backend.util.SharedBackendPaths;
 
 @Service
 public class AiConfigService {
   private final ObjectMapper objectMapper;
+
+  @Value("${app.ai.enabled:false}")
+  private boolean enabled;
 
   @Value("${app.ai.local-config-path:./config.json}")
   private String localConfigPath;
@@ -25,6 +30,49 @@ public class AiConfigService {
   public String getEnv(String... names) {
     for (String n : names) {
       String v = System.getenv(n);
+      if (v != null && !v.trim().isEmpty()) {
+        return v.trim();
+      }
+    }
+    return null;
+  }
+
+  public boolean isAiEnabled() {
+    String env = getEnv("APP_AI_ENABLED", "AI_ENABLED");
+    if (env != null) {
+      String v = env.trim().toLowerCase();
+      return v.equals("1") || v.equals("true") || v.equals("yes") || v.equals("y") || v.equals("on");
+    }
+    return enabled;
+  }
+
+  public String doubaoApiKey() {
+    return firstNonNull(
+        getEnv("ARK_API_KEY", "DOUBAO_API_KEY"),
+        getCfg("doubao.api_key")
+    );
+  }
+
+  public String doubaoModel() {
+    return firstNonNull(
+        getEnv("ARK_MODEL", "DOUBAO_MODEL", "DOUBAO_ENDPOINT_ID"),
+        getCfg("doubao.model"),
+        getCfg("doubao.endpoint_id")
+    );
+  }
+
+  public String doubaoBaseUrl() {
+    return firstNonNull(
+        getEnv("ARK_BASE_URL", "DOUBAO_BASE_URL"),
+        getCfg("doubao.base_url")
+    );
+  }
+
+  private static String firstNonNull(String... values) {
+    if (values == null) {
+      return null;
+    }
+    for (String v : values) {
       if (v != null && !v.trim().isEmpty()) {
         return v.trim();
       }
@@ -54,7 +102,13 @@ public class AiConfigService {
   @SuppressWarnings("unchecked")
   private Map<String, Object> loadLocalConfig() {
     try {
-      Path p = Path.of(localConfigPath);
+      Path p = SharedBackendPaths.resolveExistingFile(
+          localConfigPath,
+          List.of("backend/config.json", "../backend/config.json")
+      );
+      if (p == null) {
+        p = Path.of("backend/config.json").toAbsolutePath().normalize();
+      }
       if (!Files.exists(p)) {
         return Map.of();
       }

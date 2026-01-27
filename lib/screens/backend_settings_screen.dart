@@ -22,6 +22,7 @@ class _BackendSettingsScreenState extends ConsumerState<BackendSettingsScreen> {
   bool _saving = false;
   bool? _reachable;
   String? _effectiveBaseUrl;
+  bool _aiEnabled = false;
 
   @override
   void initState() {
@@ -38,13 +39,29 @@ class _BackendSettingsScreenState extends ConsumerState<BackendSettingsScreen> {
   Future<void> _load() async {
     final current = await BackendApiService.getBaseUrlOverride();
     final effective = await BackendApiService.getEffectiveBaseUrl();
+    final aiEnabled = await BackendApiService.getAiEnabled();
     if (!mounted) return;
 
     setState(() {
       _controller.text = current ?? '';
       _effectiveBaseUrl = effective;
+      _aiEnabled = aiEnabled;
       _loading = false;
     });
+  }
+
+  Future<void> _toggleAiEnabled(bool v) async {
+    setState(() {
+      _aiEnabled = v;
+    });
+    await BackendApiService.setAiEnabled(v);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+          content: Text(v
+              ? context.l10n.backendAiEnabledOn
+              : context.l10n.backendAiEnabledOff)),
+    );
   }
 
   Future<void> _save() async {
@@ -128,6 +145,14 @@ class _BackendSettingsScreenState extends ConsumerState<BackendSettingsScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(l10n.backendAiEnabledTitle),
+                      subtitle: Text(l10n.backendAiEnabledSubtitle),
+                      value: _aiEnabled,
+                      onChanged: _toggleAiEnabled,
+                    ),
+                    const SizedBox(height: 12),
                     Text(
                       l10n.backendCurrentEffective(_effectiveBaseUrl ?? ''),
                       style: Theme.of(context).textTheme.bodyMedium,

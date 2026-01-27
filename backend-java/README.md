@@ -22,19 +22,28 @@
   - `cd backend-java`
   - `chmod +x ./run_8000.sh && ./run_8000.sh`
 
+- 停止（8000 端口）：
+  - `cd backend-java`
+  - `chmod +x ./stop_8000.sh && ./stop_8000.sh`
+
 默认监听：`http://127.0.0.1:8000`
 
 ## 配置
 
 见 [src/main/resources/application.yml](src/main/resources/application.yml)
 
-- `spring.datasource.url`: `jdbc:sqlite:../backend/flutterai.db`（与 Python 后端共用）
-- `app.uploads-dir`: `../backend/uploads`（与 Python 后端共用）
-- `app.ai.local-config-path`: `../backend/config.json`（与 Python 后端共用）
+- SQLite DB / uploads / config.json 默认会自动在以下两种相对路径里探测（便于从不同工作目录启动）：
+  - `backend/...`（从仓库根目录启动）
+  - `../backend/...`（从 backend-java/ 目录启动）
+
+默认所有运行时都统一使用仓库根目录的 `flutterai.db`（与 Python/Flutter 共用）。
+
+如需强制指定 DB 路径（推荐用于部署/脚本）：
+- `APP_DB_PATH=/ABS/PATH/flutterai.db`
 
 说明：
-- 上述路径是以 `backend-java/` 作为工作目录的相对路径；如果你从别的目录启动 jar，请用环境变量覆盖：
-  - `SPRING_DATASOURCE_URL=jdbc:sqlite:/ABS/PATH/backend/flutterai.db`
+- 如果你从别的目录启动 jar，请用环境变量覆盖：
+  - `APP_DB_PATH=/ABS/PATH/flutterai.db`
   - `APP_UPLOADS_DIR=/ABS/PATH/backend/uploads`
   - `APP_AI_LOCAL_CONFIG_PATH=/ABS/PATH/backend/config.json`
 
@@ -66,8 +75,8 @@
 参考/占位：
 
 - `GET /v1/dashboard/focus`：Java 版已实现近似 focus pack（可继续按 Python 细节微调）
-- `GET /v1/ai/status`：只做“是否检测到配置”的诊断，不直连豆包 SDK
-- `POST /v1/ai/chat`：不直连 LLM；使用 `query` 进行规则意图路由（如 `progress` / `issues_top` / `issues_detail` / `focus`），返回可核验的 `facts` + 规则回答
+- `GET /v1/ai/status`：诊断配置与是否启用 LLM
+- `POST /v1/ai/chat`：规则意图路由为主；当启用时会尝试调用豆包 Ark `/chat/completions` 做润色/建议，失败自动回退规则答案；支持请求体字段 `ai_enabled`（布尔）用于移动端演示时按请求开/关
 
 ## 结构说明
 
