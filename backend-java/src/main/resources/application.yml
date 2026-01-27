@@ -7,7 +7,7 @@ spring:
   datasource:
     # Share the same SQLite DB file with the Python backend (backend/flutterai.db)
     # Override via SPRING_DATASOURCE_URL if needed.
-    url: jdbc:sqlite:../backend/flutterai.db
+    url: jdbc:sqlite:../flutterai.db
     driver-class-name: org.sqlite.JDBC
   jpa:
     hibernate:

@@ -10,13 +10,17 @@
 
 ## 运行
 
-前置：JDK 17。
+前置：JDK 17+。
 
-本机如未安装 Maven，可先：`brew install maven`。
+本项目已内置 Maven Wrapper（`./mvnw`），无需系统安装 Maven。
 
-- 启动：
+- 启动（推荐，确保相对路径正确）：
   - `cd backend-java`
-  - `mvn spring-boot:run`
+  - `./mvnw spring-boot:run`
+
+- 一键构建并在 8000 端口启动：
+  - `cd backend-java`
+  - `chmod +x ./run_8000.sh && ./run_8000.sh`
 
 默认监听：`http://127.0.0.1:8000`
 
@@ -24,12 +28,15 @@
 
 见 [src/main/resources/application.yml](src/main/resources/application.yml)
 
-- `spring.datasource.url`: `jdbc:sqlite:./flutterai.db`
-- `app.uploads-dir`: `./uploads`
-- `app.ai.local-config-path`: `./config.json`
+- `spring.datasource.url`: `jdbc:sqlite:../backend/flutterai.db`（与 Python 后端共用）
+- `app.uploads-dir`: `../backend/uploads`（与 Python 后端共用）
+- `app.ai.local-config-path`: `../backend/config.json`（与 Python 后端共用）
 
 说明：
-- 为了便于对照，默认数据库文件名与 Python 版本一致。
+- 上述路径是以 `backend-java/` 作为工作目录的相对路径；如果你从别的目录启动 jar，请用环境变量覆盖：
+  - `SPRING_DATASOURCE_URL=jdbc:sqlite:/ABS/PATH/backend/flutterai.db`
+  - `APP_UPLOADS_DIR=/ABS/PATH/backend/uploads`
+  - `APP_AI_LOCAL_CONFIG_PATH=/ABS/PATH/backend/config.json`
 
 ## API 对照
 
@@ -58,9 +65,9 @@
 
 参考/占位：
 
-- `GET /v1/dashboard/focus`：Java 版当前是占位返回（Python 版实现较重，可按需要继续补齐）
+- `GET /v1/dashboard/focus`：Java 版已实现近似 focus pack（可继续按 Python 细节微调）
 - `GET /v1/ai/status`：只做“是否检测到配置”的诊断，不直连豆包 SDK
-- `POST /v1/ai/chat`：不直连 LLM，返回可核验汇总 facts + 一段规则回答
+- `POST /v1/ai/chat`：不直连 LLM；使用 `query` 进行规则意图路由（如 `progress` / `issues_top` / `issues_detail` / `focus`），返回可核验的 `facts` + 规则回答
 
 ## 结构说明
 

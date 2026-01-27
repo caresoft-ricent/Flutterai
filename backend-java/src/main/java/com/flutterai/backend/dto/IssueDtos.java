@@ -2,6 +2,9 @@ package com.flutterai.backend.dto;
 
 import java.time.OffsetDateTime;
 
+import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
+import com.flutterai.backend.config.LenientOffsetDateTimeDeserializer;
+
 import jakarta.validation.constraints.NotBlank;
 
 public final class IssueDtos {
@@ -25,7 +28,8 @@ public final class IssueDtos {
       String status,
       String photoPath,
       String aiJson,
-      OffsetDateTime clientCreatedAt,
+        @JsonDeserialize(using = LenientOffsetDateTimeDeserializer.class)
+        OffsetDateTime clientCreatedAt,
       String source,
       String clientRecordId
   ) {}
