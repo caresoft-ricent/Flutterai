@@ -1,0 +1,65 @@
+#!/bin/sh
+# Apache Maven Wrapper
+#
+# This script is based on the standard Maven Wrapper scripts.
+
+set -euf
+
+MVNW_REPOURL=""
+
+# Resolve links: $0 may be a link
+PRG="$0"
+while [ -h "$PRG" ]; do
+  ls=`ls -ld "$PRG"`
+  link=`expr "$ls" : '.*-> \(.*\)$'`
+  if expr "$link" : '/.*' > /dev/null; then
+    PRG="$link"
+  else
+    PRG=`dirname "$PRG"`"/$link"
+  fi
+done
+SAVED_PWD=`pwd`
+cd `dirname "$PRG"` >/dev/null
+MVNW_DIR=`pwd -P`
+cd "$SAVED_PWD" >/dev/null
+
+MAVEN_PROJECTBASEDIR=${MAVEN_PROJECTBASEDIR:-"$MVNW_DIR"}
+
+WRAPPER_DIR="$MAVEN_PROJECTBASEDIR/.mvn/wrapper"
+PROPERTIES_FILE="$WRAPPER_DIR/maven-wrapper.properties"
+JAR_FILE="$WRAPPER_DIR/maven-wrapper.jar"
+
+if [ ! -f "$PROPERTIES_FILE" ]; then
+  echo "Missing $PROPERTIES_FILE" >&2
+  exit 1
+fi
+
+# Read properties
+DISTRIBUTION_URL=`grep -E '^distributionUrl=' "$PROPERTIES_FILE" | cut -d'=' -f2-`
+WRAPPER_URL=`grep -E '^wrapperUrl=' "$PROPERTIES_FILE" | cut -d'=' -f2-`
+
+if [ ! -f "$JAR_FILE" ]; then
+  if [ -z "${WRAPPER_URL}" ]; then
+    echo "Missing wrapperUrl in $PROPERTIES_FILE" >&2
+    exit 1
+  fi
+  echo "Downloading Maven Wrapper jar..." >&2
+  mkdir -p "$WRAPPER_DIR"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL "$WRAPPER_URL" -o "$JAR_FILE"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -q "$WRAPPER_URL" -O "$JAR_FILE"
+  else
+    echo "Neither curl nor wget is available to download Maven Wrapper." >&2
+    exit 1
+  fi
+fi
+
+# Run the wrapper
+JAVA_CMD=${JAVA_HOME:+"$JAVA_HOME/bin/"}java
+exec "$JAVA_CMD" \
+  -classpath "$JAR_FILE" \
+  -Dmaven.multiModuleProjectDirectory="$MAVEN_PROJECTBASEDIR" \
+  org.apache.maven.wrapper.MavenWrapperMain \
+  -Dmaven.home="$MAVEN_PROJECTBASEDIR/.mvn/wrapper" \
+  "$@"
