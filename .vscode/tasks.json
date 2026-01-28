@@ -45,6 +45,39 @@
 			],
 			"isBackground": true,
 			"problemMatcher": []
+		},
+		{
+			"label": "Build backend-java (timeouts)",
+			"type": "shell",
+			"command": "bash",
+			"args": [
+				"-lc",
+				"cd backend-java && ./mvnw -q -DskipTests package"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Flutter analyze (timeouts)",
+			"type": "shell",
+			"command": "bash",
+			"args": [
+				"-lc",
+				"flutter analyze"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
+			"label": "Restart Java backend 8000",
+			"type": "shell",
+			"command": "bash",
+			"args": [
+				"-lc",
+				"lsof -ti :8000 | xargs -r kill -15; sleep 1; java -jar backend-java/target/backend-0.1.0.jar --server.port=8000"
+			],
+			"isBackground": true,
+			"problemMatcher": []
 		}
 	]
 }

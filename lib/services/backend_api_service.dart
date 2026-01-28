@@ -29,8 +29,8 @@ class BackendApiService {
       BaseOptions(
         baseUrl: _baseUrl(),
         connectTimeout: const Duration(seconds: 3),
-        receiveTimeout: const Duration(seconds: 8),
-        sendTimeout: const Duration(seconds: 8),
+        receiveTimeout: const Duration(seconds: 20),
+        sendTimeout: const Duration(seconds: 20),
         headers: {
           'Content-Type': 'application/json',
           'Accept-Language': LocaleService.acceptLanguageHeader(

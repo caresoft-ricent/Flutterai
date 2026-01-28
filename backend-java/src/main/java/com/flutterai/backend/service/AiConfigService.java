@@ -23,6 +23,13 @@ public class AiConfigService {
   @Value("${app.ai.local-config-path:./config.json}")
   private String localConfigPath;
 
+  // LLM HTTP client timeouts (ms). Keep request timeout < mobile client's receiveTimeout.
+  @Value("${app.ai.llm.connect-timeout-ms:5000}")
+  private long llmConnectTimeoutMs;
+
+  @Value("${app.ai.llm.request-timeout-ms:12000}")
+  private long llmRequestTimeoutMs;
+
   public AiConfigService(ObjectMapper objectMapper) {
     this.objectMapper = objectMapper;
   }
@@ -44,6 +51,14 @@ public class AiConfigService {
       return v.equals("1") || v.equals("true") || v.equals("yes") || v.equals("y") || v.equals("on");
     }
     return enabled;
+  }
+
+  public long llmConnectTimeoutMs() {
+    return llmConnectTimeoutMs;
+  }
+
+  public long llmRequestTimeoutMs() {
+    return llmRequestTimeoutMs;
   }
 
   public String doubaoApiKey() {
