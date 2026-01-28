@@ -187,10 +187,9 @@ packages:
   motion_sensors:
     dependency: transitive
     description:
-      name: motion_sensors
-      sha256: "4e2734a76cd6da633013bcdc68a9efe9fbbcff906e6d6c45040932edda3fa5d6"
-      url: "https://pub.flutter-io.cn"
-    source: hosted
+      path: "../../motion_sensors"
+      relative: true
+    source: path
     version: "0.1.0"
   panorama:
     dependency: "direct main"

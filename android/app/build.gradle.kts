@@ -49,6 +49,8 @@ android {
 
     buildTypes {
         getByName("release") {
+            isMinifyEnabled = false
+            isShrinkResources = false
             // If release keystore env vars are set, sign with it; otherwise fall back to debug
             // so local builds still produce an installable APK.
             signingConfig = if (hasReleaseSigning) {
