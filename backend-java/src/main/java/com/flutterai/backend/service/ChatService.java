@@ -220,6 +220,55 @@ public class ChatService {
       return base;
     }
 
+    // Tool-like answers are already structured and accurate. Do not let LLM rewrite them,
+    // otherwise it may hallucinate (e.g., claiming 0 issues) and break trust.
+    boolean isTool = false;
+    String toolIntent = "";
+    String route = "";
+    Map<String, Object> metaMap = base.meta();
+    if (metaMap != null) {
+      Object toolObj = metaMap.get("tool");
+      isTool = toolObj != null;
+      if (toolObj instanceof Map<?, ?> toolMap) {
+        Object it = toolMap.get("intent");
+        toolIntent = it == null ? "" : it.toString();
+      }
+      Object r = metaMap.get("route");
+      route = r == null ? "" : r.toString();
+    }
+    boolean allowToolRewrite = isTool && ("progress".equals(toolIntent)
+      || "issues_top".equals(toolIntent)
+      || "issues_detail".equals(toolIntent));
+    if ((!allowToolRewrite && isTool) || (route != null && !route.isBlank() && !"chat".equals(route))) {
+      String reason;
+      if (!allowToolRewrite && isTool) {
+        reason = toolIntent == null || toolIntent.isBlank() ? "skipped_tool" : ("skipped_tool_" + toolIntent);
+      } else {
+        reason = "skipped_route";
+      }
+
+      var r0 = doubaoChatClient.status(aiEnabledOverride, reason);
+      Map<String, Object> meta = new HashMap<>();
+      if (base.meta() != null) {
+        meta.putAll(base.meta());
+      }
+      Map<String, Object> llmMeta = new HashMap<>();
+      llmMeta.put("provider", r0.provider());
+      llmMeta.put("enabled", r0.enabled());
+      llmMeta.put("configured", r0.configured());
+      llmMeta.put("requested", aiEnabledOverride);
+      llmMeta.put("attempted", false);
+      llmMeta.put("used", false);
+      llmMeta.put("model", r0.model());
+      llmMeta.put("base_url", r0.baseUrl());
+      if (r0.error() != null && !r0.error().isBlank()) {
+        llmMeta.put("error", r0.error());
+      }
+      llmMeta.put("reason", reason);
+      meta.put("llm", llmMeta);
+      return new ChatOut(base.answer(), base.facts(), meta);
+    }
+
     var r = doubaoChatClient.tryRewrite(aiEnabledOverride, query, base.answer(), base.facts());
 
     Map<String, Object> meta = new HashMap<>();
@@ -231,10 +280,20 @@ public class ChatService {
       llmMeta.put("provider", r.provider());
       llmMeta.put("enabled", r.enabled());
       llmMeta.put("configured", r.configured());
+      llmMeta.put("requested", aiEnabledOverride);
       llmMeta.put("attempted", r.attempted());
       llmMeta.put("used", r.used());
       llmMeta.put("model", r.model());
       llmMeta.put("base_url", r.baseUrl());
+      if (allowToolRewrite && toolIntent != null && !toolIntent.isBlank()) {
+        llmMeta.put("reason", "rewrite_tool_" + toolIntent);
+      }
+      if (r.timeoutMs() != null) {
+        llmMeta.put("timeout_ms", r.timeoutMs());
+      }
+      if (r.elapsedMs() != null) {
+        llmMeta.put("elapsed_ms", r.elapsedMs());
+      }
       if (r.error() != null && !r.error().isBlank()) {
         llmMeta.put("error", r.error());
       }
@@ -242,6 +301,7 @@ public class ChatService {
       llmMeta.put("provider", "doubao");
       llmMeta.put("enabled", false);
       llmMeta.put("configured", false);
+      llmMeta.put("requested", aiEnabledOverride);
       llmMeta.put("attempted", false);
       llmMeta.put("used", false);
       llmMeta.put("model", "");
@@ -250,9 +310,112 @@ public class ChatService {
     meta.put("llm", llmMeta);
 
     if (r != null && r.used() && r.answer() != null && !r.answer().isBlank()) {
+      // Guardrails: tool answers must remain semantically identical (no hallucinated digits/items);
+      // non-tool answers must not change key numeric facts.
+      boolean safe;
+      if (allowToolRewrite) {
+        safe = rewriteSafeForTool(toolIntent, base.answer(), r.answer());
+      } else {
+        safe = rewriteKeepsNumbers(base.answer(), r.answer());
+      }
+      if (!safe) {
+        llmMeta.put("used", false);
+        llmMeta.put("error", allowToolRewrite ? "unsafe_rewrite_tool" : "unsafe_rewrite");
+        llmMeta.put("fallback", "deterministic");
+        meta.put("llm", llmMeta);
+        return new ChatOut(base.answer(), base.facts(), meta);
+      }
       return new ChatOut(r.answer(), base.facts(), meta);
     }
     return new ChatOut(base.answer(), base.facts(), meta);
+  }
+
+  private static boolean rewriteSafeForTool(String toolIntent, String draft, String rewritten) {
+    if (rewritten == null || rewritten.isBlank()) {
+      return false;
+    }
+    if (draft == null) {
+      return true;
+    }
+
+    // If draft indicates "no data", rewritten must keep that meaning and must not introduce digits.
+    boolean noData = draft.contains("暂无") || draft.contains("暂时") || draft.contains("暂未");
+    if (noData) {
+      if (!(rewritten.contains("暂无") || rewritten.contains("暂"))) {
+        return false;
+      }
+      if (containsDigits(rewritten)) {
+        return false;
+      }
+      return true;
+    }
+
+    // If there are digits in draft, rewritten must preserve all digit sequences.
+    if (!rewriteKeepsNumbers(draft, rewritten)) {
+      return false;
+    }
+
+    // For issues_* lists, keep the same number of category rows (e.g. "1) ...").
+    if (toolIntent != null && toolIntent.startsWith("issues_")) {
+      int a = countLineStartsWithNumberParen(draft);
+      int b = countLineStartsWithNumberParen(rewritten);
+      if (a > 0 && b != a) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  private static boolean containsDigits(String s) {
+    if (s == null || s.isEmpty()) return false;
+    for (int i = 0; i < s.length(); i++) {
+      char c = s.charAt(i);
+      if (c >= '0' && c <= '9') return true;
+    }
+    return false;
+  }
+
+  private static int countLineStartsWithNumberParen(String s) {
+    if (s == null || s.isBlank()) return 0;
+    int count = 0;
+    String[] lines = s.split("\\r?\\n");
+    for (String line : lines) {
+      if (line == null) continue;
+      String t = line.trim();
+      if (t.isEmpty()) continue;
+      // Matches: 1) xxx
+      if (t.length() >= 2 && Character.isDigit(t.charAt(0)) && t.charAt(1) == ')') {
+        count++;
+        continue;
+      }
+      // Matches: 12) xxx
+      if (t.length() >= 3 && Character.isDigit(t.charAt(0)) && Character.isDigit(t.charAt(1)) && t.charAt(2) == ')') {
+        count++;
+      }
+    }
+    return count;
+  }
+
+  private static boolean rewriteKeepsNumbers(String draft, String rewritten) {
+    if (draft == null || draft.isBlank()) {
+      return true;
+    }
+    if (rewritten == null || rewritten.isBlank()) {
+      return false;
+    }
+    // Only enforce Arabic digits; if draft has no digits, allow.
+    Pattern p = Pattern.compile("\\d+");
+    Matcher m = p.matcher(draft);
+    boolean hasAny = false;
+    while (m.find()) {
+      hasAny = true;
+      String num = m.group();
+      if (!rewritten.contains(num)) {
+        return false;
+      }
+    }
+    return true;
   }
 
   private String fallbackAnswer(String q, Map<String, Object> facts) {

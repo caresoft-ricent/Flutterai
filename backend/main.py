@@ -805,6 +805,7 @@ class ChatIn(BaseModel):
     query: Optional[str] = None
     project_name: Optional[str] = None
     messages: Optional[list[dict]] = None
+    ai_enabled: Optional[bool] = None
 
 
 class ChatPlan(BaseModel):
@@ -870,6 +871,38 @@ def _get_cfg(path: str) -> Optional[str]:
     return s or None
 
 
+def _parse_bool(v: Optional[object]) -> Optional[bool]:
+    if v is None:
+        return None
+    if isinstance(v, bool):
+        return v
+    s = str(v).strip().lower()
+    if not s:
+        return None
+    if s in {"1", "true", "yes", "y", "on"}:
+        return True
+    if s in {"0", "false", "no", "n", "off"}:
+        return False
+    return None
+
+
+def _ai_enabled(override: Optional[bool] = None) -> bool:
+    """Return whether LLM calls are allowed.
+
+    Default is disabled to avoid unintended token consumption.
+    Override (per-request) takes precedence.
+    """
+    if override is not None:
+        return bool(override)
+
+    env_v = _parse_bool(_get_env("APP_AI_ENABLED", "AI_ENABLED"))
+    if env_v is not None:
+        return bool(env_v)
+
+    cfg_v = _parse_bool(_get_cfg("app.ai.enabled") or _get_cfg("ai.enabled") or _get_cfg("doubao.enabled"))
+    return bool(cfg_v) if cfg_v is not None else False
+
+
 _ark_client = None
 
 
@@ -890,16 +923,22 @@ def ai_status():
     base_url = _get_env("ARK_BASE_URL", "DOUBAO_BASE_URL") or _get_cfg("doubao.base_url")
     client = _get_ark_client()
 
+    enabled = _ai_enabled(None)
+    note = "configured=true 表示已检测到 API Key + model/endpoint；是否实际计费取决于调用链和后端日志/meta.llm.used/meta.llm.attempted。"
+    if not enabled:
+        note = "当前未启用（APP_AI_ENABLED/ai.enabled=false）；/v1/ai/chat 不会调用大模型，仅返回规则/意图路由答案。"
+
     return {
         "llm": {
             "provider": "doubao",
             "configured": bool(api_key and model),
+            "enabled": bool(enabled),
             "has_api_key": bool(api_key),
             "has_model": bool(model),
             "has_client": bool(client is not None),
             "model": model or "",
             "base_url": base_url or "",
-            "note": "configured=true 表示已检测到 API Key + model/endpoint；是否实际计费取决于调用链和后端日志/meta.llm.used。",
+            "note": note,
         }
     }
 
@@ -2244,6 +2283,8 @@ def chat_with_data(payload: ChatIn, db: Session = Depends(get_db)):
     if not q:
         raise HTTPException(status_code=400, detail="query is empty")
 
+    enabled = _ai_enabled(payload.ai_enabled)
+
     project_id = (
         _ensure_project(db, payload.project_name).id
         if payload.project_name and payload.project_name.strip()
@@ -2306,6 +2347,10 @@ def chat_with_data(payload: ChatIn, db: Session = Depends(get_db)):
             "route": "chat",
             "tool": {"intent": "progress", "scope": scope0},
             "llm": {
+                "enabled": bool(enabled),
+                "attempted": False,
+                "plan_attempted": False,
+                "answer_attempted": False,
                 "used": False,
                 "provider": "doubao",
                 "model": (
@@ -2369,6 +2414,10 @@ def chat_with_data(payload: ChatIn, db: Session = Depends(get_db)):
             "route": "chat",
             "tool": {"intent": intent, "scope": scope0},
             "llm": {
+                "enabled": bool(enabled),
+                "attempted": False,
+                "plan_attempted": False,
+                "answer_attempted": False,
                 "used": False,
                 "provider": "doubao",
                 "model": (
@@ -2381,11 +2430,18 @@ def chat_with_data(payload: ChatIn, db: Session = Depends(get_db)):
         }
         return ChatOut(answer="\n".join(lines), facts={"issue_categories": cats}, meta=meta).model_dump()
 
+    focus_by_keyword = _is_focus_query(q)
+
     # 1) Extract an intent plan (prefer LLM, fallback heuristics)
     def _plan_call():
         return _doubao_extract_plan(query=q, messages=payload.messages)
 
-    raw_plan, plan_call_meta = _call_with_timeout(_plan_call, timeout_s=1.8, default=None)
+    plan_attempted = False
+    if enabled and not focus_by_keyword:
+        plan_attempted = True
+        raw_plan, plan_call_meta = _call_with_timeout(_plan_call, timeout_s=1.8, default=None)
+    else:
+        raw_plan, plan_call_meta = None, {"skipped": True}
     plan = None
     if isinstance(raw_plan, dict):
         try:
@@ -2400,7 +2456,6 @@ def chat_with_data(payload: ChatIn, db: Session = Depends(get_db)):
         )
 
     # Guardrail: don't let LLM mis-route everything into focus.
-    focus_by_keyword = _is_focus_query(q)
     if not focus_by_keyword and (plan.intent or "").strip().lower() == "focus":
         plan.intent = "fallback"
 
@@ -2427,6 +2482,10 @@ def chat_with_data(payload: ChatIn, db: Session = Depends(get_db)):
         meta: dict = {
             "route": "focus",
             "llm": {
+                "enabled": bool(enabled),
+                "attempted": bool(plan_attempted),
+                "plan_attempted": bool(plan_attempted),
+                "answer_attempted": False,
                 "used": False,
                 "provider": "doubao",
                 "model": (
@@ -2446,6 +2505,10 @@ def chat_with_data(payload: ChatIn, db: Session = Depends(get_db)):
     meta: dict = {
         "route": "chat",
         "llm": {
+            "enabled": bool(enabled),
+            "attempted": False,
+            "plan_attempted": bool(plan_attempted),
+            "answer_attempted": False,
             "used": False,
             "provider": "doubao",
             "model": (
@@ -2460,12 +2523,23 @@ def chat_with_data(payload: ChatIn, db: Session = Depends(get_db)):
     if plan_call_meta.get("timed_out"):
         meta["llm"]["plan_timed_out"] = True
 
+    if not enabled:
+        meta["llm"]["disabled"] = True
+
     # Prefer Doubao (ARK) if configured; fall back to rule-based MVP.
     # Hard guard: keep total latency under client receiveTimeout (default 8s).
     def _ans_call():
         return _doubao_chat_answer(query=q, facts=facts, messages=payload.messages)
 
-    llm_answer, ans_call_meta = _call_with_timeout(_ans_call, timeout_s=5.5, default=None)
+    answer_attempted = False
+    if enabled:
+        answer_attempted = True
+        llm_answer, ans_call_meta = _call_with_timeout(_ans_call, timeout_s=5.5, default=None)
+    else:
+        llm_answer, ans_call_meta = None, {"skipped": True}
+
+    meta["llm"]["answer_attempted"] = bool(answer_attempted)
+    meta["llm"]["attempted"] = bool(plan_attempted or answer_attempted)
     if llm_answer:
         meta["llm"]["used"] = True
         return ChatOut(answer=llm_answer, facts=facts, meta=meta).model_dump()

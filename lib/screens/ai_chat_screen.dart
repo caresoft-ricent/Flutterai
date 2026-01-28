@@ -447,12 +447,46 @@ class _AiChatScreenState extends ConsumerState<AiChatScreen> {
             ? llmRaw.map((k, v) => MapEntry(k.toString(), v))
             : <String, dynamic>{};
         final used = (llm['used'] == true);
+        final enabled = (llm['enabled'] == true);
+        final configured = (llm['configured'] == true);
+        final attempted = (llm['attempted'] == true);
+        final err = (llm['error']?.toString() ?? '').trim();
+        final reason = (llm['reason']?.toString() ?? '').trim();
+        final requested = llm['requested'];
         final provider = (llm['provider']?.toString() ?? '').trim();
         final model = (llm['model']?.toString() ?? '').trim();
 
         final segs = <String>[];
         if (route.isNotEmpty) segs.add('route=$route');
-        segs.add(used ? 'LLM=on' : 'LLM=off');
+        if (requested is bool) {
+          segs.add(requested ? 'req=on' : 'req=off');
+        }
+        if (enabled) {
+          segs.add('LLM=on');
+          if (!configured) {
+            segs.add('not_configured');
+          } else if (!attempted) {
+            final r = reason.isNotEmpty ? reason : err;
+            if (r.startsWith('skipped_tool')) {
+              final suffix = r.replaceFirst('skipped_tool', '');
+              final name =
+                  suffix.startsWith('_') ? suffix.substring(1) : suffix;
+              segs.add(name.isNotEmpty ? 'skip=$name' : 'skip=tool');
+            } else if (r == 'skipped_route') {
+              segs.add('skip=route');
+            }
+          } else if (!used && attempted) {
+            segs.add(err.isNotEmpty ? 'fallback=$err' : 'fallback');
+          }
+        } else {
+          // Backward compatible: if backend doesn't send 'enabled', fall back to 'used'.
+          segs.add(llm.containsKey('enabled')
+              ? 'LLM=off'
+              : (used ? 'LLM=on' : 'LLM=off'));
+          if (llm.containsKey('enabled') && err.isNotEmpty) {
+            segs.add(err);
+          }
+        }
         if (provider.isNotEmpty) segs.add(provider);
         if (model.isNotEmpty) segs.add(model);
         return segs.join(' · ');
@@ -881,12 +915,44 @@ class _MetaBanner extends StatelessWidget {
         ? llmRaw.map((k, v) => MapEntry(k.toString(), v))
         : <String, dynamic>{};
     final used = (llm['used'] == true);
+    final enabled = (llm['enabled'] == true);
+    final configured = (llm['configured'] == true);
+    final attempted = (llm['attempted'] == true);
+    final err = (llm['error']?.toString() ?? '').trim();
+    final reason = (llm['reason']?.toString() ?? '').trim();
+    final requested = llm['requested'];
     final provider = (llm['provider']?.toString() ?? '').trim();
     final model = (llm['model']?.toString() ?? '').trim();
 
     final label = <String>[];
     if (route.isNotEmpty) label.add('route=$route');
-    label.add(used ? 'LLM=on' : 'LLM=off');
+    if (requested is bool) {
+      label.add(requested ? 'req=on' : 'req=off');
+    }
+    if (enabled) {
+      label.add('LLM=on');
+      if (!configured) {
+        label.add('not_configured');
+      } else if (!attempted) {
+        final r = reason.isNotEmpty ? reason : err;
+        if (r.startsWith('skipped_tool')) {
+          final suffix = r.replaceFirst('skipped_tool', '');
+          final name = suffix.startsWith('_') ? suffix.substring(1) : suffix;
+          label.add(name.isNotEmpty ? 'skip=$name' : 'skip=tool');
+        } else if (r == 'skipped_route') {
+          label.add('skip=route');
+        }
+      } else if (!used && attempted) {
+        label.add(err.isNotEmpty ? 'fallback=$err' : 'fallback');
+      }
+    } else {
+      label.add(llm.containsKey('enabled')
+          ? 'LLM=off'
+          : (used ? 'LLM=on' : 'LLM=off'));
+      if (llm.containsKey('enabled') && err.isNotEmpty) {
+        label.add(err);
+      }
+    }
     if (provider.isNotEmpty) label.add(provider);
     if (model.isNotEmpty) label.add(model);
 
