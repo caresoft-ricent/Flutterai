@@ -8,7 +8,6 @@ import 'package:go_router/go_router.dart';
 
 import '../l10n/context_l10n.dart';
 import '../services/defect_library_service.dart';
-import '../services/gemma_multimodal_service.dart';
 import '../services/online_vision_service.dart';
 import '../services/last_inspection_location_service.dart';
 import '../services/network_service.dart';
@@ -18,7 +17,6 @@ import '../services/tts_service.dart';
 import '../services/gemma_service.dart';
 import '../services/database_service.dart';
 import '../services/procedure_acceptance_library_service.dart';
-import '../services/use_gemma_multimodal_service.dart';
 import '../services/use_offline_speech_service.dart';
 import '../models/library.dart';
 import '../models/region.dart';
@@ -1063,7 +1061,6 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
 
     try {
       final hasNetwork = await ref.read(networkServiceProvider).hasNetwork();
-      final useGemma = ref.read(useGemmaMultimodalProvider);
 
       final library = ref.read(defectLibraryServiceProvider);
       await library.ensureLoaded();
@@ -1079,7 +1076,7 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
       final candidateLines =
           candidateEntries.map((e) => e.toPromptLine()).toList();
 
-      if (hasNetwork && !useGemma) {
+      if (hasNetwork) {
         final onlineVision = ref.read(onlineVisionServiceProvider);
         final result = await onlineVision.analyzeImageAutoStructured(
           path,
@@ -1223,41 +1220,11 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
         return;
       }
 
-      final gemma = ref.read(gemmaMultimodalServiceProvider);
-      final result = await gemma.analyzeImageAutoStructured(
-        path,
-        sceneHint: sceneHint,
-        hint: hint,
-      );
-
+      // Offline mode: no offline multimodal model support.
       if (!mounted) return;
-
-      // Analysis is done; hide the overlay before waiting for user actions.
-      setState(() {
-        _aiAnalyzing = false;
-      });
-      final text = result.text.trim();
-      if (text.isNotEmpty) {
-        unawaited(
-          ref
-              .read(ttsServiceProvider)
-              .speak(_l10n.dailyInspectionTtsRecognizedPleaseConfirm),
-        );
-        final action = await _showAiConfirmSheet(
-          body: Text(text),
-          confirmLabel: _l10n.commonAgreeAndFill,
-          cancelLabel: _l10n.commonDisagree,
-        );
-        if (!mounted) return;
-        if (action == _AiConfirmAction.voiceDescribe) {
-          await _voiceDescribeAndFill(beforeText: beforeText);
-        } else if (action == _AiConfirmAction.accept) {
-          setState(() {
-            _descController.text =
-                beforeText.isEmpty ? text : '$beforeText\n$text';
-          });
-        }
-      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(_l10n.commonNetworkRequired)),
+      );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

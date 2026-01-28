@@ -26,10 +26,18 @@ apply plugin: 'kotlin-android'
 
 android {
     namespace 'finaldev.motion_sensors'
-    compileSdkVersion 28
+    compileSdkVersion 36
 
     sourceSets {
         main.java.srcDirs += 'src/main/kotlin'
+    }
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = JavaVersion.VERSION_17
     }
     defaultConfig {
         minSdkVersion 16

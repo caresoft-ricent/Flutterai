@@ -4,34 +4,24 @@ import '../models/library.dart';
 import '../models/parsed_intent.dart';
 import '../models/region.dart';
 import 'database_service.dart';
-import 'gemma_multimodal_service.dart';
 import 'procedure_acceptance_library_service.dart';
-import 'use_gemma_multimodal_service.dart';
 
 final gemmaServiceProvider = Provider<GemmaService>((ref) {
   final dbService = ref.read(databaseServiceProvider);
   final procedureLibrary = ref.read(procedureAcceptanceLibraryServiceProvider);
-  final mm = ref.read(gemmaMultimodalServiceProvider);
-  final useMultimodal = ref.watch(useGemmaMultimodalProvider);
   return GemmaService(
     dbService: dbService,
     procedureLibrary: procedureLibrary,
-    mm: mm,
-    useMultimodal: useMultimodal,
   );
 });
 
 class GemmaService {
   final DatabaseService dbService;
   final ProcedureAcceptanceLibraryService procedureLibrary;
-  final GemmaMultimodalService mm;
-  final bool useMultimodal;
 
   GemmaService({
     required this.dbService,
     required this.procedureLibrary,
-    required this.mm,
-    required this.useMultimodal,
   });
 
   static const String _promptTemplate = '''
@@ -59,30 +49,6 @@ class GemmaService {
 
   /// 对外统一入口：先尝试调用 Gemma，本地模型不可用时退化到规则解析。
   Future<ParsedIntentResult> parseIntent(String userInput) async {
-    if (useMultimodal) {
-      try {
-        final r = await mm.parseIntent(userInput);
-
-        // If the model is uncertain, fall back to rule-based intent so common
-        // “发现…” / safety violation phrases still route correctly.
-        if (r.intent == 'unknown') {
-          final fallback = _fallbackRuleBased(userInput);
-          if (fallback.intent != 'unknown') {
-            return ParsedIntentResult(
-              intent: fallback.intent,
-              regionText: r.regionText ?? fallback.regionText,
-              regionCode: r.regionCode ?? fallback.regionCode,
-              libraryName: r.libraryName ?? fallback.libraryName,
-              libraryCode: r.libraryCode ?? fallback.libraryCode,
-            );
-          }
-        }
-
-        return r;
-      } catch (_) {
-        // Fall back.
-      }
-    }
     return _fallbackRuleBased(userInput);
   }
 
