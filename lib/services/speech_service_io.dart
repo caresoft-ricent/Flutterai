@@ -463,8 +463,9 @@ final stream = recognizer.createStream();
       _log('startListening: preferOnline=false, using offline sherpa');
     }
 
-    // Prefer Xunfei online STT when requested and credentials are present.
-    // Any failure (no network / auth / ws) falls back to offline sherpa.
+    // When preferOnline=true, we run in ONLINE-ONLY mode:
+    // - try Xunfei if credentials are present
+    // - DO NOT fall back to offline init/download automatically
     if (preferOnline) {
       _log('startListening: preferOnline=true, trying xunfei');
       final appId = _xunfeiAppIdOrNull();
@@ -484,12 +485,21 @@ final stream = recognizer.createStream();
             _onFinalResult = onFinalResult;
             return true;
           }
+          _lastInitStage = 'xunfei';
+          _lastInitError = '在线语音识别启动失败：讯飞未能建立连接';
         } catch (e) {
-          _log('xunfei start failed, fallback offline: $e');
+          _log('xunfei start failed (online-only): $e');
+          _lastInitStage = 'xunfei';
+          _lastInitError = '在线语音识别启动失败：$e';
         }
       } else {
         _log('startListening: preferOnline requested but xunfei creds missing');
+        _lastInitStage = 'xunfei';
+        _lastInitError = '在线语音识别不可用：缺少讯飞配置（APP_ID/API_KEY/API_SECRET）';
       }
+
+      // Online-only mode: never initialize/download offline models implicitly.
+      return false;
     }
 
     final ok = await init(

@@ -8,17 +8,15 @@ import 'package:go_router/go_router.dart';
 
 import '../l10n/context_l10n.dart';
 import '../services/defect_library_service.dart';
-import '../services/gemma_multimodal_service.dart';
 import '../services/online_vision_service.dart';
 import '../services/last_inspection_location_service.dart';
 import '../services/network_service.dart';
 import '../services/backend_api_service.dart';
 import '../services/speech_service.dart';
 import '../services/tts_service.dart';
-import '../services/gemma_service.dart';
+import '../services/intent_parser_service.dart';
 import '../services/database_service.dart';
 import '../services/procedure_acceptance_library_service.dart';
-import '../services/use_gemma_multimodal_service.dart';
 import '../services/use_offline_speech_service.dart';
 import '../models/library.dart';
 import '../models/region.dart';
@@ -228,14 +226,14 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
   }
 
   Future<void> _handleRecognizedTextForSession(String text) async {
-    final gemma = ref.read(gemmaServiceProvider);
+    final intentParser = ref.read(intentParserServiceProvider);
     final db = ref.read(databaseServiceProvider);
     final procedureLibrary =
         ref.read(procedureAcceptanceLibraryServiceProvider);
     final tts = ref.read(ttsServiceProvider);
 
-    final base = await gemma.parseIntent(text);
-    final enriched = await gemma.enrichWithLocalData(base, text);
+    final base = await intentParser.parseIntent(text);
+    final enriched = await intentParser.enrichWithLocalData(base, text);
     if (!mounted) return;
 
     if (enriched.intent == 'procedure_acceptance') {
@@ -1063,7 +1061,9 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
 
     try {
       final hasNetwork = await ref.read(networkServiceProvider).hasNetwork();
-      final useGemma = ref.read(useGemmaMultimodalProvider);
+      if (!hasNetwork) {
+        throw StateError('无网络，无法进行图片识别');
+      }
 
       final library = ref.read(defectLibraryServiceProvider);
       await library.ensureLoaded();
@@ -1079,185 +1079,146 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
       final candidateLines =
           candidateEntries.map((e) => e.toPromptLine()).toList();
 
-      if (hasNetwork && !useGemma) {
-        final onlineVision = ref.read(onlineVisionServiceProvider);
-        final result = await onlineVision.analyzeImageAutoStructured(
-          path,
-          sceneHint: sceneHint,
-          hint: hint,
-          defectLibraryCandidateLines: candidateLines,
-        );
-
-        if (!mounted) return;
-
-        // Analysis is done; hide the overlay before waiting for user actions
-        // (confirm / voice describe). Otherwise live ASR text will be covered.
-        setState(() {
-          _aiAnalyzing = false;
-        });
-
-        DefectLibraryEntry? picked;
-        final matchId = result.matchId.trim();
-        if (matchId.isNotEmpty) {
-          picked = _lookupEntryByIdFlexible(library, matchId);
-        }
-
-        // Fallback: infer from returned text even if id lookup failed.
-        // (If the model mislabels type as other, we still try local matching,
-        // unless it explicitly says irrelevant.)
-        if (picked == null && result.type != 'irrelevant') {
-          final query = <String>[
-            '日常巡检',
-            _location,
-            userHintText,
-            result.summary,
-            result.defectType,
-            result.rectifySuggestion,
-          ].where((s) => s.trim().isNotEmpty).join(' ');
-
-          final inferred = library.suggest(query: query, limit: 1);
-          if (inferred.isNotEmpty) picked = inferred.first;
-        }
-
-        // Preview text (not applied yet).
-        final p = picked;
-        final base = p?.indicator.trim() ?? '';
-        final summary = result.summary.trim();
-        final defectType = result.defectType.trim();
-        final severity = result.severity.trim();
-        final suggestion = result.rectifySuggestion.trim();
-
-        final extraLines = <String>[];
-        if (summary.isNotEmpty) extraLines.add(_l10n.commonLineNote(summary));
-        if (defectType.isNotEmpty) {
-          extraLines.add(_l10n.dailyInspectionLineDefectType(defectType));
-        }
-        if (severity.isNotEmpty) {
-          extraLines.add(_l10n.dailyInspectionLineSeverity(severity));
-        }
-        if (suggestion.isNotEmpty) {
-          extraLines.add(_l10n.dailyInspectionLineRectify(suggestion));
-        }
-
-        final mergedPreview = <String>[
-          if (base.isNotEmpty) base,
-          ...extraLines,
-        ].join('\n');
-
-        unawaited(
-          ref
-              .read(ttsServiceProvider)
-              .speak(_l10n.dailyInspectionTtsRecognizedPleaseConfirm),
-        );
-        final action = await _showAiConfirmSheet(
-          body: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (p != null) ...[
-                _aiSummaryLine(
-                  _l10n.dailyInspectionAiWillFillLabel,
-                  '${p.division} / ${p.subDivision} / ${p.item} / ${p.indicator}',
-                ),
-                _aiSummaryLine(_l10n.dailyInspectionAiLabelEntryId, p.id),
-                _aiSummaryLine(
-                    _l10n.dailyInspectionAiLabelLevel, p.levelNormalized),
-                _aiSummaryLine(
-                  _l10n.dailyInspectionAiLabelDeadlineDays,
-                  p.deadlineLabel,
-                ),
-              ] else ...[
-                _aiSummaryLine(
-                  _l10n.dailyInspectionAiLabelCategory,
-                  _l10n.dailyInspectionAiCategoryNotMatchedHint,
-                ),
-              ],
-              _aiSummaryLine(_l10n.dailyInspectionAiLabelType, result.type),
-              _aiSummaryLine(_l10n.dailyInspectionAiLabelSummary, summary),
-              _aiSummaryLine(
-                  _l10n.dailyInspectionAiLabelDefectType, defectType),
-              _aiSummaryLine(_l10n.dailyInspectionAiLabelSeverity, severity),
-              _aiSummaryLine(
-                _l10n.dailyInspectionAiLabelRectifySuggestion,
-                suggestion.replaceAll('；', '\n- '),
-              ),
-              if (mergedPreview.trim().isNotEmpty) ...[
-                const SizedBox(height: 8),
-                Text(
-                  _l10n.dailyInspectionAiWillFillDescLabel,
-                  style: Theme.of(context).textTheme.labelLarge,
-                ),
-                const SizedBox(height: 6),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    border: Border.all(color: Theme.of(context).dividerColor),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Text(
-                    mergedPreview,
-                    maxLines: 8,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ],
-            ],
-          ),
-        );
-
-        if (!mounted) return;
-        if (action == _AiConfirmAction.voiceDescribe) {
-          await _voiceDescribeAndFill(beforeText: beforeText);
-        } else if (action == _AiConfirmAction.accept) {
-          setState(() {
-            if (p != null) {
-              _applyEntryDefaults(p);
-            }
-            if (mergedPreview.trim().isNotEmpty) {
-              _descController.text = mergedPreview;
-              _lastAutoFilledDesc = mergedPreview;
-            }
-          });
-        }
-        return;
-      }
-
-      final gemma = ref.read(gemmaMultimodalServiceProvider);
-      final result = await gemma.analyzeImageAutoStructured(
+      final onlineVision = ref.read(onlineVisionServiceProvider);
+      final result = await onlineVision.analyzeImageAutoStructured(
         path,
         sceneHint: sceneHint,
         hint: hint,
+        defectLibraryCandidateLines: candidateLines,
       );
 
       if (!mounted) return;
 
-      // Analysis is done; hide the overlay before waiting for user actions.
+      // Analysis is done; hide the overlay before waiting for user actions
+      // (confirm / voice describe). Otherwise live ASR text will be covered.
       setState(() {
         _aiAnalyzing = false;
       });
-      final text = result.text.trim();
-      if (text.isNotEmpty) {
-        unawaited(
-          ref
-              .read(ttsServiceProvider)
-              .speak(_l10n.dailyInspectionTtsRecognizedPleaseConfirm),
-        );
-        final action = await _showAiConfirmSheet(
-          body: Text(text),
-          confirmLabel: _l10n.commonAgreeAndFill,
-          cancelLabel: _l10n.commonDisagree,
-        );
-        if (!mounted) return;
-        if (action == _AiConfirmAction.voiceDescribe) {
-          await _voiceDescribeAndFill(beforeText: beforeText);
-        } else if (action == _AiConfirmAction.accept) {
-          setState(() {
-            _descController.text =
-                beforeText.isEmpty ? text : '$beforeText\n$text';
-          });
-        }
+
+      DefectLibraryEntry? picked;
+      final matchId = result.matchId.trim();
+      if (matchId.isNotEmpty) {
+        picked = _lookupEntryByIdFlexible(library, matchId);
       }
+
+      // Fallback: infer from returned text even if id lookup failed.
+      // (If the model mislabels type as other, we still try local matching,
+      // unless it explicitly says irrelevant.)
+      if (picked == null && result.type != 'irrelevant') {
+        final query = <String>[
+          '日常巡检',
+          _location,
+          userHintText,
+          result.summary,
+          result.defectType,
+          result.rectifySuggestion,
+        ].where((s) => s.trim().isNotEmpty).join(' ');
+
+        final inferred = library.suggest(query: query, limit: 1);
+        if (inferred.isNotEmpty) picked = inferred.first;
+      }
+
+      // Preview text (not applied yet).
+      final p = picked;
+      final base = p?.indicator.trim() ?? '';
+      final summary = result.summary.trim();
+      final defectType = result.defectType.trim();
+      final severity = result.severity.trim();
+      final suggestion = result.rectifySuggestion.trim();
+
+      final extraLines = <String>[];
+      if (summary.isNotEmpty) extraLines.add(_l10n.commonLineNote(summary));
+      if (defectType.isNotEmpty) {
+        extraLines.add(_l10n.dailyInspectionLineDefectType(defectType));
+      }
+      if (severity.isNotEmpty) {
+        extraLines.add(_l10n.dailyInspectionLineSeverity(severity));
+      }
+      if (suggestion.isNotEmpty) {
+        extraLines.add(_l10n.dailyInspectionLineRectify(suggestion));
+      }
+
+      final mergedPreview = <String>[
+        if (base.isNotEmpty) base,
+        ...extraLines,
+      ].join('\n');
+
+      unawaited(
+        ref
+            .read(ttsServiceProvider)
+            .speak(_l10n.dailyInspectionTtsRecognizedPleaseConfirm),
+      );
+      final action = await _showAiConfirmSheet(
+        body: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (p != null) ...[
+              _aiSummaryLine(
+                _l10n.dailyInspectionAiWillFillLabel,
+                '${p.division} / ${p.subDivision} / ${p.item} / ${p.indicator}',
+              ),
+              _aiSummaryLine(_l10n.dailyInspectionAiLabelEntryId, p.id),
+              _aiSummaryLine(
+                  _l10n.dailyInspectionAiLabelLevel, p.levelNormalized),
+              _aiSummaryLine(
+                _l10n.dailyInspectionAiLabelDeadlineDays,
+                p.deadlineLabel,
+              ),
+            ] else ...[
+              _aiSummaryLine(
+                _l10n.dailyInspectionAiLabelCategory,
+                _l10n.dailyInspectionAiCategoryNotMatchedHint,
+              ),
+            ],
+            _aiSummaryLine(_l10n.dailyInspectionAiLabelType, result.type),
+            _aiSummaryLine(_l10n.dailyInspectionAiLabelSummary, summary),
+            _aiSummaryLine(_l10n.dailyInspectionAiLabelDefectType, defectType),
+            _aiSummaryLine(_l10n.dailyInspectionAiLabelSeverity, severity),
+            _aiSummaryLine(
+              _l10n.dailyInspectionAiLabelRectifySuggestion,
+              suggestion.replaceAll('；', '\n- '),
+            ),
+            if (mergedPreview.trim().isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(
+                _l10n.dailyInspectionAiWillFillDescLabel,
+                style: Theme.of(context).textTheme.labelLarge,
+              ),
+              const SizedBox(height: 6),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  border: Border.all(color: Theme.of(context).dividerColor),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  mergedPreview,
+                  maxLines: 8,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ],
+        ),
+      );
+
+      if (!mounted) return;
+      if (action == _AiConfirmAction.voiceDescribe) {
+        await _voiceDescribeAndFill(beforeText: beforeText);
+      } else if (action == _AiConfirmAction.accept) {
+        setState(() {
+          if (p != null) {
+            _applyEntryDefaults(p);
+          }
+          if (mergedPreview.trim().isNotEmpty) {
+            _descController.text = mergedPreview;
+            _lastAutoFilledDesc = mergedPreview;
+          }
+        });
+      }
+      return;
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

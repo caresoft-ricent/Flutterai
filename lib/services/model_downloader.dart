@@ -6,11 +6,17 @@ import 'package:dio/dio.dart';
 import 'package:path/path.dart' as p;
 
 class ModelDownloader {
-  static const String asrModelUrl =
-      'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20.tar.bz2';
+  static const String asrModelUrl = String.fromEnvironment(
+    'ASR_MODEL_URL',
+    defaultValue:
+        'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20.tar.bz2',
+  );
 
-  static const String vadModelUrl =
-      'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx';
+  static const String vadModelUrl = String.fromEnvironment(
+    'VAD_MODEL_URL',
+    defaultValue:
+        'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx',
+  );
 
   static const List<String> _requiredAsrFiles = [
     'encoder.onnx',

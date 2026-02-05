@@ -1,0 +1,11 @@
+target/
+.mvn/wrapper/
+run.log
+run.pid
+server_8000.log
+server_8000.pid
+flutterai.db
+**/*.db
+.vscode/
+.idea/
+.DS_Store

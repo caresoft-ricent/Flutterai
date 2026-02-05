@@ -13,7 +13,6 @@ import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
-import io.flutter.plugin.common.PluginRegistry.Registrar
 
 // translate from https://github.com/flutter/plugins/tree/master/packages/sensors
 /** MotionSensorsPlugin */
@@ -47,11 +46,7 @@ public class MotionSensorsPlugin : FlutterPlugin, MethodChannel.MethodCallHandle
   private var screenOrientationStreamHandler: ScreenOrientationStreamHandler? = null
 
   companion object {
-    @JvmStatic
-    fun registerWith(registrar: Registrar) {
-      val plugin = MotionSensorsPlugin()
-      plugin.setupEventChannels(registrar.context(), registrar.messenger())
-    }
+    // Flutter v1 embedding (Registrar) 已在新版本中移除；此插件只支持 v2 embedding。
   }
 
   override fun onAttachedToEngine(@NonNull binding: FlutterPlugin.FlutterPluginBinding) {

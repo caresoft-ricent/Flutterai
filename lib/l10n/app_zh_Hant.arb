@@ -83,13 +83,6 @@
   "homeToggleOfflineSpeech": "啟用離線語音辨識",
   "homeStatusOfflineSpeechEnabled": "離線語音辨識已開啟",
   "homeStatusOfflineSpeechDisabled": "離線語音辨識已關閉（使用訊飛線上）",
-  "homeToggleOfflineGemmaMultimodal": "啟用離線Gemma多模態（圖片辨識）",
-  "homeStatusPreparingGemmaMultimodal": "正在準備Gemma多模態模型…",
-  "homeStatusGemmaMultimodalEnabled": "Gemma多模態已啟用",
-  "homeSnackGemmaMultimodalEnableFailed": "Gemma多模態啟用失敗：{error}\n提示：該模型在 HuggingFace 為受限倉庫，需要先同意授權並提供 token（--dart-define=HUGGINGFACE_TOKEN=... 或 lib/app_local_secrets.dart:kHuggingfaceToken）。",
-  "@homeSnackGemmaMultimodalEnableFailed": {"placeholders": {"error": {"type": "Object"}}},
-  "homeStatusGemmaMultimodalEnableFailedFallback": "多模態啟用失敗，已回退規則解析",
-  "homeStatusGemmaMultimodalDisabled": "多模態已關閉",
 
   "homeButtonProcedureAcceptance": "工序驗收",
   "homeButtonDailyInspection": "日常巡檢",

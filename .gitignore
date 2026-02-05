@@ -56,3 +56,7 @@ app.*.map.json
 com.ricent.beaverai.plist
 check.json
 deps.txt
+
+# Local env files (do not commit)
+.env
+.env.*
