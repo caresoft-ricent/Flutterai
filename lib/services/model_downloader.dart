@@ -9,7 +9,7 @@ class ModelDownloader {
   static const String asrModelUrl = String.fromEnvironment(
     'ASR_MODEL_URL',
     defaultValue:
-        'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20.tar.bz2',
+        'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23.tar.bz2',
   );
 
   static const String vadModelUrl = String.fromEnvironment(

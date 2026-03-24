@@ -15,6 +15,10 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import org.hibernate.query.NativeQuery;
+import org.hibernate.type.StandardBasicTypes;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -30,6 +34,7 @@ import com.flutterai.backend.util.RegionParser.ParsedRegion;
 
 @Service
 public class DashboardService {
+  private static final Logger log = LoggerFactory.getLogger(DashboardService.class);
   private final EntityManager entityManager;
 
   public DashboardService(EntityManager entityManager) {
@@ -283,14 +288,22 @@ public class DashboardService {
         continue;
       }
 
-      Query u = entityManager.createNativeQuery(updateSql);
-      u.setParameter("bn", parsed.buildingNo());
-      u.setParameter("fn", parsed.floorNo());
-      u.setParameter("zn", parsed.zone());
-      u.setParameter("id", id);
-      int n = u.executeUpdate();
-      if (n > 0) {
-        updated += 1;
+      try {
+        Query u = entityManager.createNativeQuery(updateSql);
+        NativeQuery<?> nu = u.unwrap(NativeQuery.class);
+        // NOTE: In native queries, binding null without an explicit type can intermittently
+        // lead to SQLite driver errors like "No parameter has been set yet".
+        nu.setParameter("bn", parsed.buildingNo(), StandardBasicTypes.STRING);
+        nu.setParameter("fn", parsed.floorNo(), StandardBasicTypes.INTEGER);
+        nu.setParameter("zn", parsed.zone(), StandardBasicTypes.STRING);
+        nu.setParameter("id", id, StandardBasicTypes.LONG);
+        int n = nu.executeUpdate();
+        if (n > 0) {
+          updated += 1;
+        }
+      } catch (Exception e) {
+        // Best-effort backfill: never fail user-facing chat for a backfill glitch.
+        log.warn("Backfill {} failed for id={}: {}", table, id, e.toString());
       }
     }
     return updated;
