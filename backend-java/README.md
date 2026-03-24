@@ -28,6 +28,21 @@
 
 默认监听：`http://127.0.0.1:8000`
 
+## Docker（用于 K8s 部署）
+
+已提供 [Dockerfile](Dockerfile)（多阶段构建，运行时 JRE 17）。
+
+- 构建（在 `backend-java/` 目录执行）：
+  - `docker build -t flutterai-backend-java:local .`
+
+- Mac 上给 Linux K8s 构建（推荐 amd64，避免架构不匹配）：
+  - `docker buildx build --platform linux/amd64 -t <registry>/<repo>:<tag> --push .`
+
+常用环境变量（按部署情况在 K8s 里设置/挂载）：
+- `APP_DB_PATH=/data/flutterai.db`
+- `APP_UPLOADS_DIR=/data/uploads`
+- `APP_AI_ENABLED=true|false`
+
 ## 配置
 
 见 [src/main/resources/application.yml](src/main/resources/application.yml)

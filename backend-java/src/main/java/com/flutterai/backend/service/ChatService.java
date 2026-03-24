@@ -54,7 +54,8 @@ public class ChatService {
 
     IntentAndScope det = inferIntentAndScope(q, payload == null ? null : payload.messages());
     String intent = det.intent;
-    Map<String, Object> scope = det.scope;
+    // Defensive: ensure scope is always mutable. (Some helpers may return Map.of() etc.)
+    Map<String, Object> scope = det.scope == null ? new HashMap<>() : new HashMap<>(det.scope);
 
     String building = (String) scope.get("building");
     Integer floor = (Integer) scope.get("floor");
@@ -549,7 +550,17 @@ public class ChatService {
     Map<String, Integer> a = acceptanceItemCounts(projectId, building, floor);
     Map<String, Integer> i = issueCounts(projectId, building, floor, responsibleUnit);
 
-    out.put("scope", Map.of("building", building, "floor", floor, "responsible_unit", responsibleUnit));
+    Map<String, Object> scopeOut = new HashMap<>();
+    if (building != null) {
+      scopeOut.put("building", building);
+    }
+    if (floor != null) {
+      scopeOut.put("floor", floor);
+    }
+    if (responsibleUnit != null) {
+      scopeOut.put("responsible_unit", responsibleUnit);
+    }
+    out.put("scope", scopeOut);
     out.put(
         "scope_acceptance",
         Map.of(
@@ -1078,7 +1089,7 @@ public class ChatService {
       scope.put("time_range_days", days);
     }
 
-    String ru = extractResponsibleUnit(s);
+    String ru = extractResponsibleUnit(q);
     if (ru != null) {
       scope.put("responsible_unit", ru);
     }
@@ -1141,7 +1152,7 @@ public class ChatService {
     if (s == null) {
       return null;
     }
-    Matcher m = Pattern.compile("责任单位[:：]?([^\n\r，,。；; ]{2,20})").matcher(s);
+    Matcher m = Pattern.compile("责任单位[:：]?([^\\n\\r，,。；;？！!?、 ]{2,20})").matcher(s);
     if (m.find()) {
       String ru = m.group(1).trim();
       return ru.isEmpty() ? null : ru;

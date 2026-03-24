@@ -2,6 +2,17 @@
 	"version": "2.0.0",
 	"tasks": [
 		{
+			"label": "Publish Android release (internal)",
+			"type": "shell",
+			"command": "bash",
+			"args": [
+				"-lc",
+				"./scripts/publish_android_internal.sh"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		},
+		{
 			"label": "Run Java backend (8000)",
 			"type": "shell",
 			"command": "java",

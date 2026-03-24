@@ -8,7 +8,6 @@ final useOfflineSpeechProvider =
 
 class UseOfflineSpeechNotifier extends StateNotifier<bool> {
   static const _key = 'use_offline_speech';
-  static const _legacyKey = 'use_online_ai';
 
   UseOfflineSpeechNotifier() : super(false) {
     _load();
@@ -21,16 +20,6 @@ class UseOfflineSpeechNotifier extends StateNotifier<bool> {
     final v = prefs.getBool(_key);
     if (v != null) {
       state = v;
-      return;
-    }
-
-    // Migrate from legacy "use_online_ai" semantics:
-    // legacy true  => online
-    // new true     => offline
-    final legacy = prefs.getBool(_legacyKey);
-    if (legacy != null) {
-      state = !legacy;
-      await prefs.setBool(_key, state);
       return;
     }
 

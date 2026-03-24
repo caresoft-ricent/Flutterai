@@ -9,12 +9,10 @@ import '../l10n/context_l10n.dart';
 import '../models/library.dart';
 import '../models/region.dart';
 import '../services/database_service.dart';
-import '../services/gemma_service.dart';
 import '../services/speech_service.dart';
 import '../services/tts_service.dart';
-import '../services/gemma_multimodal_service.dart';
 import '../services/procedure_acceptance_library_service.dart';
-import '../services/use_gemma_multimodal_service.dart';
+import '../services/intent_parser_service.dart';
 import '../services/use_offline_speech_service.dart';
 import 'acceptance_guide_screen.dart';
 import 'app_settings_screen.dart';
@@ -44,10 +42,6 @@ enum _HomeStatusKind {
   speechModelNotReadyWithError,
   offlineSpeechEnabled,
   offlineSpeechDisabled,
-  preparingGemmaMultimodal,
-  gemmaMultimodalEnabled,
-  gemmaMultimodalEnableFailedFallback,
-  gemmaMultimodalDisabled,
   stoppedListening,
   intentParsing,
   notMatchedRetry,
@@ -86,14 +80,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         return l10n.homeStatusOfflineSpeechEnabled;
       case _HomeStatusKind.offlineSpeechDisabled:
         return l10n.homeStatusOfflineSpeechDisabled;
-      case _HomeStatusKind.preparingGemmaMultimodal:
-        return l10n.homeStatusPreparingGemmaMultimodal;
-      case _HomeStatusKind.gemmaMultimodalEnabled:
-        return l10n.homeStatusGemmaMultimodalEnabled;
-      case _HomeStatusKind.gemmaMultimodalEnableFailedFallback:
-        return l10n.homeStatusGemmaMultimodalEnableFailedFallback;
-      case _HomeStatusKind.gemmaMultimodalDisabled:
-        return l10n.homeStatusGemmaMultimodalDisabled;
       case _HomeStatusKind.stoppedListening:
         return l10n.homeStatusStoppedListening;
       case _HomeStatusKind.intentParsing:
@@ -102,81 +88,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         return l10n.homeStatusNotMatchedRetry;
       case _HomeStatusKind.intentUnrecognizedRetry:
         return l10n.homeStatusIntentUnrecognizedRetry;
-    }
-  }
-
-  Future<bool> _ensureGemmaMultimodalWithProgress() async {
-    if (!mounted) return false;
-
-    final mm = ref.read(gemmaMultimodalServiceProvider);
-    final progress = ValueNotifier<int>(0);
-
-    bool dialogShown = false;
-    Future<void>? dialogFuture;
-    bool finished = false;
-
-    void showIfNeeded() {
-      if (dialogShown || !mounted) return;
-      dialogShown = true;
-      dialogFuture = showDialog<void>(
-        context: context,
-        barrierDismissible: false,
-        builder: (ctx) {
-          final l10n = ctx.l10n;
-          return AlertDialog(
-            title: Text(l10n.homeDownloadGemmaTitle),
-            content: ValueListenableBuilder<int>(
-              valueListenable: progress,
-              builder: (_, v, __) {
-                final pct = v.clamp(0, 100).toString();
-                return Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(l10n.homeDownloadGemmaBody),
-                    const SizedBox(height: 12),
-                    LinearProgressIndicator(value: v == 0 ? null : v / 100),
-                    const SizedBox(height: 8),
-                    Text(l10n.homeProgressLabel(pct)),
-                  ],
-                );
-              },
-            ),
-          );
-        },
-      );
-    }
-
-    Future<void>.delayed(const Duration(milliseconds: 500)).then((_) {
-      if (!mounted) return;
-      if (finished) return;
-      showIfNeeded();
-    });
-
-    try {
-      await mm.ensureInstalled(
-        onProgress: (p) {
-          progress.value = p;
-          if (p > 0) showIfNeeded();
-        },
-      );
-      finished = true;
-      if (!mounted) return true;
-      if (dialogShown) {
-        Navigator.of(context, rootNavigator: true).pop();
-        await dialogFuture!;
-      }
-      return true;
-    } catch (_) {
-      finished = true;
-      if (mounted && dialogShown) {
-        Navigator.of(context, rootNavigator: true).pop();
-        await dialogFuture!;
-      }
-      rethrow;
-    } finally {
-      finished = true;
-      progress.dispose();
     }
   }
 
@@ -275,8 +186,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final preferOnline = !useOfflineSpeech;
     final l10n = context.l10n;
 
-    // Online-first mode: try Xunfei directly. Only if it fails, fall back to
-    // offline init + sherpa.
+    // Online-only mode (offline switch is off): use Xunfei and never trigger
+    // offline model download implicitly.
     if (preferOnline) {
       setState(() {
         _statusKind = _HomeStatusKind.connectingOnlineAsr;
@@ -306,7 +217,26 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         finalizeOnEndpoint: false,
       );
 
-      if (startedOnline) return;
+      if (startedOnline) {
+        setState(() {
+          _statusKind = _HomeStatusKind.listeningSpeakCommand;
+          _statusArg = null;
+        });
+        return;
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _statusKind = _HomeStatusKind.onlineUnavailableFallback;
+        _statusArg = null;
+      });
+      final err = (speech.lastInitError ?? '').trim();
+      if (err.isNotEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(err)),
+        );
+      }
+      return;
     }
 
     // Offline fallback / normal mode: ensure sherpa model is ready.
@@ -416,7 +346,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   Future<void> _handleRecognizedText(String text) async {
-    final gemma = ref.read(gemmaServiceProvider);
+    final intentParser = ref.read(intentParserServiceProvider);
     final db = ref.read(databaseServiceProvider);
     final procedureLibrary =
         ref.read(procedureAcceptanceLibraryServiceProvider);
@@ -424,8 +354,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final l10n = context.l10n;
 
     try {
-      final base = await gemma.parseIntent(text);
-      final enriched = await gemma.enrichWithLocalData(base, text);
+      final base = await intentParser.parseIntent(text);
+      final enriched = await intentParser.enrichWithLocalData(base, text);
 
       if (!mounted) return;
 
@@ -536,7 +466,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   Widget build(BuildContext context) {
     // NOTE: HomeScreen has lots of runtime strings; we incrementally migrate them to l10n.
     final l10n = context.l10n;
-    final useMultimodal = ref.watch(useGemmaMultimodalProvider);
     final useOfflineSpeech = ref.watch(useOfflineSpeechProvider);
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final colorScheme = Theme.of(context).colorScheme;
@@ -639,71 +568,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       ],
                     ),
                     const Divider(height: 12),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(l10n.homeToggleOfflineGemmaMultimodal),
-                        ),
-                        Switch(
-                          value: useMultimodal,
-                          onChanged: _isProcessing
-                              ? null
-                              : (v) async {
-                                  final notifier = ref.read(
-                                      useGemmaMultimodalProvider.notifier);
-
-                                  if (v) {
-                                    try {
-                                      setState(() {
-                                        _statusKind = _HomeStatusKind
-                                            .preparingGemmaMultimodal;
-                                        _statusArg = null;
-                                      });
-                                      final ok =
-                                          await _ensureGemmaMultimodalWithProgress();
-                                      if (!context.mounted) return;
-                                      if (ok) {
-                                        await notifier.setEnabled(true);
-                                        if (!context.mounted) return;
-                                        setState(() {
-                                          _statusKind = _HomeStatusKind
-                                              .gemmaMultimodalEnabled;
-                                          _statusArg = null;
-                                        });
-                                      }
-                                    } catch (e) {
-                                      await notifier.setEnabled(false);
-                                      if (!context.mounted) return;
-                                      ScaffoldMessenger.of(context)
-                                          .showSnackBar(
-                                        SnackBar(
-                                          content: Text(
-                                            l10n.homeSnackGemmaMultimodalEnableFailed(
-                                              e,
-                                            ),
-                                          ),
-                                        ),
-                                      );
-                                      if (!context.mounted) return;
-                                      setState(() {
-                                        _statusKind = _HomeStatusKind
-                                            .gemmaMultimodalEnableFailedFallback;
-                                        _statusArg = null;
-                                      });
-                                    }
-                                  } else {
-                                    await notifier.setEnabled(false);
-                                    if (!context.mounted) return;
-                                    setState(() {
-                                      _statusKind = _HomeStatusKind
-                                          .gemmaMultimodalDisabled;
-                                      _statusArg = null;
-                                    });
-                                  }
-                                },
-                        ),
-                      ],
-                    ),
+                    // 离线 Gemma 多模态（图片识别）功能已下线。
                   ],
                 ),
               ),

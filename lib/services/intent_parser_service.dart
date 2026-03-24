@@ -4,85 +4,27 @@ import '../models/library.dart';
 import '../models/parsed_intent.dart';
 import '../models/region.dart';
 import 'database_service.dart';
-import 'gemma_multimodal_service.dart';
 import 'procedure_acceptance_library_service.dart';
-import 'use_gemma_multimodal_service.dart';
 
-final gemmaServiceProvider = Provider<GemmaService>((ref) {
+final intentParserServiceProvider = Provider<IntentParserService>((ref) {
   final dbService = ref.read(databaseServiceProvider);
   final procedureLibrary = ref.read(procedureAcceptanceLibraryServiceProvider);
-  final mm = ref.read(gemmaMultimodalServiceProvider);
-  final useMultimodal = ref.watch(useGemmaMultimodalProvider);
-  return GemmaService(
+  return IntentParserService(
     dbService: dbService,
     procedureLibrary: procedureLibrary,
-    mm: mm,
-    useMultimodal: useMultimodal,
   );
 });
 
-class GemmaService {
+class IntentParserService {
   final DatabaseService dbService;
   final ProcedureAcceptanceLibraryService procedureLibrary;
-  final GemmaMultimodalService mm;
-  final bool useMultimodal;
 
-  GemmaService({
+  IntentParserService({
     required this.dbService,
     required this.procedureLibrary,
-    required this.mm,
-    required this.useMultimodal,
   });
 
-  static const String _promptTemplate = '''
-你是河狸云工序验收语音助手，只处理验收和问题上报意图。
-用户输入：{user_input}
-
-请严格输出 JSON，格式：
-{
-  "intent": "procedure_acceptance" | "report_issue" | "unknown",
-  "region_text": "1栋6层" 或 null,
-  "region_code": "匹配到的 rc_ou_region.id_code" 或 null,
-  "library_name": "钢筋" 或 null,
-  "library_code": "匹配到的 rc_library_library.id_code" 或 null
-}
-
-位置匹配规则：支持“X栋”“X层”“X单元”等自然表达，使用本地数据库模糊查找。
-分项匹配：支持常见别名，如“钢筋”、“绑钢筋” → “钢筋工程”。
-如果无法匹配，intent设为"unknown"。
-只输出 JSON，不要任何解释。
-''';
-
-  String buildPrompt(String userInput) {
-    return _promptTemplate.replaceAll('{user_input}', userInput);
-  }
-
-  /// 对外统一入口：先尝试调用 Gemma，本地模型不可用时退化到规则解析。
   Future<ParsedIntentResult> parseIntent(String userInput) async {
-    if (useMultimodal) {
-      try {
-        final r = await mm.parseIntent(userInput);
-
-        // If the model is uncertain, fall back to rule-based intent so common
-        // “发现…” / safety violation phrases still route correctly.
-        if (r.intent == 'unknown') {
-          final fallback = _fallbackRuleBased(userInput);
-          if (fallback.intent != 'unknown') {
-            return ParsedIntentResult(
-              intent: fallback.intent,
-              regionText: r.regionText ?? fallback.regionText,
-              regionCode: r.regionCode ?? fallback.regionCode,
-              libraryName: r.libraryName ?? fallback.libraryName,
-              libraryCode: r.libraryCode ?? fallback.libraryCode,
-            );
-          }
-        }
-
-        return r;
-      } catch (_) {
-        // Fall back.
-      }
-    }
     return _fallbackRuleBased(userInput);
   }
 

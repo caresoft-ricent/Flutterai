@@ -53,3 +53,10 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+com.ricent.beaverai.plist
+check.json
+deps.txt
+
+# Local env files (do not commit)
+.env
+.env.*

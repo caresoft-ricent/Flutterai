@@ -12,15 +12,13 @@ import '../models/region.dart';
 import '../models/target.dart';
 import '../services/defect_library_service.dart';
 import '../services/online_vision_service.dart';
-import '../services/gemma_multimodal_service.dart';
 import '../services/backend_api_service.dart';
 import '../services/offline_cache_service.dart';
 import '../services/database_service.dart';
 import '../services/procedure_acceptance_library_service.dart';
-import '../services/gemma_service.dart';
+import '../services/intent_parser_service.dart';
 import '../services/speech_service.dart';
 import '../services/tts_service.dart';
-import '../services/use_gemma_multimodal_service.dart';
 import '../services/use_offline_speech_service.dart';
 import '../utils/constants.dart';
 import 'camera_capture_screen.dart';
@@ -393,14 +391,14 @@ class _AcceptanceGuideScreenState extends ConsumerState<AcceptanceGuideScreen> {
   }
 
   Future<void> _handleRecognizedTextForSelection(String text) async {
-    final gemma = ref.read(gemmaServiceProvider);
+    final intentParser = ref.read(intentParserServiceProvider);
     final db = ref.read(databaseServiceProvider);
     final procedureLibrary =
         ref.read(procedureAcceptanceLibraryServiceProvider);
     final tts = ref.read(ttsServiceProvider);
 
-    final base = await gemma.parseIntent(text);
-    final enriched = await gemma.enrichWithLocalData(base, text);
+    final base = await intentParser.parseIntent(text);
+    final enriched = await intentParser.enrichWithLocalData(base, text);
     if (!mounted) return;
 
     if (enriched.intent == 'procedure_acceptance') {
@@ -852,24 +850,6 @@ class _AcceptanceGuideScreenState extends ConsumerState<AcceptanceGuideScreen> {
       if (existing != null) {
         final locale = Localizations.localeOf(context);
         var updated = existing.copyWith(photoPath: path);
-
-        // Optional: offline image recognition remark.
-        final enabled = ref.read(useGemmaMultimodalProvider);
-        if (enabled) {
-          try {
-            final mm = ref.read(gemmaMultimodalServiceProvider);
-            final analysis = await mm.analyzeImageAuto(
-              path,
-              sceneHint: _l10n.acceptanceSceneHintPhoto,
-              hint: _l10n.acceptancePhotoHintRemark,
-              targetName: target.name,
-              targetStandard: target.description,
-            );
-            updated = updated.copyWith(remark: analysis);
-          } catch (_) {
-            // Ignore analysis failure.
-          }
-        }
 
         // Online structured analysis (for acceptance display).
         try {

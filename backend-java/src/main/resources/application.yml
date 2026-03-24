@@ -10,6 +10,11 @@ spring:
     # This value is kept mainly for documentation and can be overridden by SPRING_DATASOURCE_URL.
     url: jdbc:sqlite:./flutterai.db?busy_timeout=10000
     driver-class-name: org.sqlite.JDBC
+    hikari:
+      # SQLite is single-writer and is prone to lock errors with larger pools.
+      # Keep a single connection to reduce SQLITE_BUSY under concurrent requests.
+      maximum-pool-size: 1
+      minimum-idle: 1
   jpa:
     hibernate:
       ddl-auto: update
