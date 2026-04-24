@@ -11,6 +11,7 @@ import 'screens/supervision_check_screen.dart';
 import 'screens/panorama_inspection_screen.dart';
 import 'screens/backend_settings_screen.dart';
 import 'screens/app_settings_screen.dart';
+import 'screens/yolo_settings_screen.dart';
 import 'screens/records_screen.dart';
 import 'screens/project_dashboard_screen.dart';
 import 'screens/ai_chat_screen.dart';
@@ -70,6 +71,11 @@ final _routerProvider = Provider<GoRouter>((ref) {
         path: '/settings',
         name: AppSettingsScreen.routeName,
         builder: (context, state) => const AppSettingsScreen(),
+      ),
+      GoRoute(
+        path: '/settings/yolo',
+        name: YoloSettingsScreen.routeName,
+        builder: (context, state) => const YoloSettingsScreen(),
       ),
       GoRoute(
         path: '/records',

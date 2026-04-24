@@ -58,6 +58,16 @@ android {
             }
         }
     }
+
+    packaging {
+        jniLibs {
+            pickFirsts += listOf(
+                "lib/x86_64/libonnxruntime.so",
+                "lib/armeabi-v7a/libonnxruntime.so",
+                "lib/arm64-v8a/libonnxruntime.so"
+            )
+        }
+    }
 }
 
 flutter {

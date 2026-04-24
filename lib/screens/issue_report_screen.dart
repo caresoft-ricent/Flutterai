@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -20,8 +21,10 @@ import '../services/procedure_acceptance_library_service.dart';
 import '../services/use_offline_speech_service.dart';
 import '../models/library.dart';
 import '../models/region.dart';
+import '../services/yolo_detection_service.dart';
 import '../widgets/photo_preview.dart';
 import 'camera_capture_screen.dart';
+import 'detection_result_screen.dart';
 import 'acceptance_guide_screen.dart';
 import 'home_screen.dart';
 import 'records_screen.dart';
@@ -982,12 +985,132 @@ class _IssueReportScreenState extends ConsumerState<IssueReportScreen> {
       return;
     }
 
+    // --- Try local YOLO detection first ---
+    final yolo = ref.read(yoloDetectionServiceProvider);
+    final localEnabled = await yolo.isLocalDetectionEnabled();
+    final yoloOnly = await yolo.isYoloOnlyMode();
+    if (localEnabled) {
+      final handled = await _tryLocalDetection(path, yoloOnly: yoloOnly);
+      if (handled) return;
+    }
+
+    if (yoloOnly) {
+      // 仅YOLO模式下不走云端
+      debugPrint('[YOLO] yoloOnly mode: skip cloud analysis');
+      return;
+    }
+
     unawaited(
       ref
           .read(ttsServiceProvider)
           .speak(_l10n.dailyInspectionTtsPhotoDoneStartAnalyze),
     );
     unawaited(_analyzePhoto(path));
+  }
+
+  /// Run YOLO on-device detection. Returns true if the result was handled
+  /// locally (user accepted), false if we should fall back to cloud.
+  Future<bool> _tryLocalDetection(String path, {bool yoloOnly = false}) async {
+    final yolo = ref.read(yoloDetectionServiceProvider);
+
+    setState(() {
+      _aiAnalyzing = true;
+    });
+    YoloDetectionResult result;
+    try {
+      result = await yolo.detect(File(path));
+    } catch (e) {
+      debugPrint('[YOLO] Local detection error: $e');
+      if (mounted) {
+        setState(() {
+          _aiAnalyzing = false;
+        });
+      }
+      return false;
+    }
+    if (!mounted) return true;
+    setState(() {
+      _aiAnalyzing = false;
+    });
+
+    // If no detections or max confidence below threshold → fall back to cloud.
+    final confThreshold = await yolo.getConfidenceThreshold();
+    if (!result.hasDetections || result.maxConfidence < confThreshold) {
+      debugPrint('[YOLO] No confident detections '
+          '(max=${result.maxConfidence.toStringAsFixed(2)}, '
+          'threshold=$confThreshold). Falling back to cloud.');
+      if (yoloOnly) {
+        // 仅YOLO模式：即使没检测结果也展示
+        if (!mounted) return true;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('YOLO 未检测到问题（仅YOLO模式，不转云端）')),
+        );
+        return true;
+      }
+      return false;
+    }
+
+    // Show detection result screen with bounding boxes.
+    if (!mounted) return true;
+    final action = await DetectionResultScreen.show(
+      context,
+      imagePath: path,
+      result: result,
+    );
+
+    if (!mounted) return true;
+
+    if (action == 'accept') {
+      // Use local detection result to fill the form.
+      _applyYoloDetectionResult(result);
+      return true;
+    } else if (action == 'cloud') {
+      // User explicitly wants cloud analysis.
+      return false;
+    }
+    // Cancelled.
+    return true;
+  }
+
+  /// Map YOLO detections into the issue form fields.
+  void _applyYoloDetectionResult(YoloDetectionResult result) {
+    if (result.detections.isEmpty) return;
+
+    // Use the highest-confidence detection as the primary issue.
+    final primary = result.detections.first;
+    final library = ref.read(defectLibraryServiceProvider);
+
+    // Try matching YOLO class to defect library.
+    final query = '日常巡检 $_location ${primary.className}';
+    final inferred = library.suggest(query: query, limit: 1);
+    if (inferred.isNotEmpty) {
+      _applyEntryDefaults(inferred.first);
+    }
+
+    // Build description text.
+    final lines = <String>[];
+    for (final det in result.detections) {
+      final sev = kClassSeverityMap[det.className] ?? 'medium';
+      lines.add(
+          '${det.className} (置信度${(det.confidence * 100).toStringAsFixed(0)}%, 严重程度:$sev)');
+    }
+    if (result.detections.length > 1) {
+      lines.insert(0, '端侧模型共检测到 ${result.detections.length} 个问题:');
+    }
+    final suggestion = kClassRectifySuggestionMap[primary.className] ?? '';
+    if (suggestion.isNotEmpty) {
+      lines.add('整改建议: $suggestion');
+    }
+
+    setState(() {
+      final desc = lines.join('\n');
+      _descController.text = desc;
+      _lastAutoFilledDesc = desc;
+
+      // Set severity from primary detection.
+      final sev = kClassSeverityMap[primary.className] ?? 'medium';
+      _severity = sev == 'high' ? _IssueSeverity.severe : _IssueSeverity.normal;
+    });
   }
 
   Future<void> _fillFromSpokenIssueAfterPhoto(String path) async {

@@ -6,6 +6,7 @@ import '../l10n/context_l10n.dart';
 import '../services/app_locale_controller.dart';
 import '../services/locale_service.dart';
 import 'backend_settings_screen.dart';
+import 'yolo_settings_screen.dart';
 
 class AppSettingsScreen extends ConsumerWidget {
   static const routeName = 'app-settings';
@@ -92,6 +93,13 @@ class AppSettingsScreen extends ConsumerWidget {
             title: Text(l10n.backendSettingsTitle),
             trailing: const Icon(Icons.chevron_right),
             onTap: () => context.pushNamed(BackendSettingsScreen.routeName),
+          ),
+          const Divider(height: 0),
+          ListTile(
+            title: const Text('端侧检测设置'),
+            subtitle: const Text('YOLO 模型 / 置信度阈值'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => context.pushNamed(YoloSettingsScreen.routeName),
           ),
         ],
       ),
